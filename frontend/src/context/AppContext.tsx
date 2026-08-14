@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useReducer, useCallback, ReactNode } from 'react';
 import { ImmichAsset } from '../api/immich';
-import { AppSettings, ProviderInfo } from '../api/editor';
+import { AppSettings, ProviderInfo, LoraSelection } from '../api/editor';
 
 // ── Toast ──────────────────────────────────────────────────
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
@@ -40,6 +40,8 @@ interface AppState {
   providers: ProviderInfo[];
   activeProvider: string;
   activeModel: string;
+  /** LoRAs chosen for the next edit. Only sent for LoRA-capable models. */
+  selectedLoras: LoraSelection[];
   strength: number;
   steps: number;
   settingsOpen: boolean;
@@ -60,6 +62,8 @@ type AppAction =
   | { type: 'SET_PROVIDERS'; providers: ProviderInfo[] }
   | { type: 'SET_PROVIDER'; provider: string; model?: string }
   | { type: 'SET_MODEL'; model: string }
+  | { type: 'TOGGLE_LORA'; lora: LoraSelection; cap: number }
+  | { type: 'CLEAR_LORAS' }
   | { type: 'SET_STRENGTH'; strength: number }
   | { type: 'SET_STEPS'; steps: number }
   | { type: 'SET_SETTINGS_OPEN'; open: boolean }
@@ -76,8 +80,11 @@ const initialState: AppState = {
   editProgress: '',
   settings: null,
   providers: [],
-  activeProvider: 'fal',
-  activeModel: 'fal-ai/flux-kontext/max',
+  // Registry defaults. These are canonical model ids now, not provider slugs —
+  // the previous 'fal-ai/flux-kontext/max' no longer resolves.
+  activeProvider: 'runware',
+  activeModel: 'flux-kontext-dev',
+  selectedLoras: [],
   strength: 0.75,
   steps: 30,
   settingsOpen: false,
@@ -150,12 +157,36 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'SET_PROVIDER': {
       const provider = action.provider;
       const providerInfo = state.providers.find(p => p.id === provider);
-      const model = action.model || providerInfo?.model || state.activeModel;
-      return { ...state, activeProvider: provider, activeModel: model };
+      const requested = action.model || providerInfo?.model || state.activeModel;
+      // Keep the current model only if the new provider can actually run it,
+      // otherwise fall back to that provider's first available model.
+      const available = providerInfo?.models || [];
+      const model = available.some(m => m.id === requested)
+        ? requested
+        : (available[0]?.id || requested);
+      return { ...state, activeProvider: provider, activeModel: model, selectedLoras: [] };
     }
 
     case 'SET_MODEL':
-      return { ...state, activeModel: action.model };
+      // Selections belong to the model that was active when they were made.
+      return { ...state, activeModel: action.model, selectedLoras: [] };
+
+    case 'TOGGLE_LORA': {
+      const exists = state.selectedLoras.some(l => l.id === action.lora.id);
+      if (exists) {
+        return { ...state, selectedLoras: state.selectedLoras.filter(l => l.id !== action.lora.id) };
+      }
+      // At the provider's cap, drop the oldest so selecting always does something
+      // visible rather than silently no-oping.
+      const next = [...state.selectedLoras, action.lora];
+      return {
+        ...state,
+        selectedLoras: next.length > action.cap ? next.slice(next.length - action.cap) : next,
+      };
+    }
+
+    case 'CLEAR_LORAS':
+      return { ...state, selectedLoras: [] };
 
     case 'SET_STRENGTH':
       return { ...state, strength: action.strength };

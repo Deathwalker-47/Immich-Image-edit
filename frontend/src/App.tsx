@@ -4,6 +4,7 @@ import { Gallery } from './components/Gallery/Gallery';
 import { EditorPanel } from './components/Editor/EditorPanel';
 import { SettingsModal } from './components/Settings/SettingsModal';
 import { ToastContainer } from './components/Toast/ToastContainer';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { fetchSettings, fetchProviders } from './api/editor';
 import { fetchAssetInfo } from './api/immich';
 
@@ -128,10 +129,20 @@ function AppShell() {
         </div>
       </aside>
 
-      {/* Main content */}
+      {/* Main content.
+          Keyed per view so recovering from an editor crash gives a genuinely fresh
+          subtree, and the reset drops back to the gallery — the one state we know
+          renders, rather than re-rendering whatever just threw. */}
       <main className="main-content">
-        {state.view === 'gallery' && <Gallery />}
-        {state.view === 'editor' && <EditorPanel />}
+        <ErrorBoundary
+          key={state.view}
+          title={state.view === 'editor' ? 'The editor hit a problem' : 'The gallery hit a problem'}
+          resetLabel="Back to gallery"
+          onReset={() => dispatch({ type: 'CLOSE_EDITOR' })}
+        >
+          {state.view === 'gallery' && <Gallery />}
+          {state.view === 'editor' && <EditorPanel />}
+        </ErrorBoundary>
       </main>
 
       {/* Modals & Overlays */}

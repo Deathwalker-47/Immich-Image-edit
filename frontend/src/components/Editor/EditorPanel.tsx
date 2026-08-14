@@ -19,6 +19,12 @@ export function EditorPanel() {
       // Use the current image URL as source (allows chaining edits)
       const sourceUrl = currentImage?.imageUrl || `/api/immich/assets/${activeAsset.id}/original`;
 
+      // The backend rejects LoRAs on models that don't support them, so only send
+      // them when the active model actually is LoRA-capable.
+      const activeModelInfo = state.providers
+        .find(p => p.id === state.activeProvider)
+        ?.models?.find(m => m.id === state.activeModel);
+
       const result: EditResult = await runEdit({
         imageUrl: sourceUrl,
         prompt,
@@ -27,19 +33,23 @@ export function EditorPanel() {
         strength: state.strength,
         steps: state.steps,
         negativePrompt: 'blurry, low quality, artifacts, watermark, overexposed, underexposed',
+        loras: activeModelInfo?.loraCapable ? state.selectedLoras : undefined,
       });
 
       const newStep = {
         id: Math.random().toString(36).substr(2, 9),
         imageUrl: result.imageUrl,
         prompt,
-        provider: result.provider,
-        model: result.model,
+        provider: result.provider || state.activeProvider,
+        model: result.model || state.activeModel,
         label: `Edit ${prompt.substring(0, 30)}...`,
       };
 
       dispatch({ type: 'ADD_EDIT_STEP', step: newStep });
-      addToast({ type: 'success', title: 'Edit applied!', message: `via ${result.provider} · ${result.model.split('/').pop()}` });
+      // Cosmetic only — never let formatting the success message throw after the
+      // step has already been committed to state.
+      const modelLabel = String(newStep.model).split('/').pop();
+      addToast({ type: 'success', title: 'Edit applied!', message: `via ${newStep.provider} · ${modelLabel}` });
     } catch (err: any) {
       console.error('[Editor] Edit failed:', err);
       addToast({ type: 'error', title: 'Edit failed', message: err.message });
@@ -74,7 +84,9 @@ export function EditorPanel() {
       addToast({
         type: 'success',
         title: 'Saved to Immich!',
-        message: `Asset ID: ${assetId.substring(0, 8)}... added to "${state.settings?.aiEditsAlbumName || 'AI Edits'}" album`,
+        message: assetId
+          ? `Asset ID: ${String(assetId).substring(0, 8)}... added to "${state.settings?.aiEditsAlbumName || 'AI Edits'}" album`
+          : `Added to "${state.settings?.aiEditsAlbumName || 'AI Edits'}" album`,
       });
     } catch (err: any) {
       addToast({ type: 'error', title: 'Save failed', message: err.message });

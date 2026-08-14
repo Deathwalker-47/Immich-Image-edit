@@ -24,6 +24,51 @@ export interface ImmichAsset {
   };
 }
 
+/**
+ * Fetch with a small retry budget.
+ *
+ * The Immich timeline fetch fails intermittently, and a single failure used to
+ * leave the gallery empty with no way forward. Retrying transient failures removes
+ * most of those dead-ends before the UI ever has to show an error.
+ *
+ * Only network errors and 5xx/429 responses are retried — a 401 or 404 will not
+ * fix itself, and retrying it just delays the real message.
+ */
+async function fetchWithRetry(url: string, attempts = 3, baseDelayMs = 400): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) {
+      // 400ms, 800ms — brief enough not to feel stalled.
+      await new Promise((resolve) => setTimeout(resolve, baseDelayMs * 2 ** (attempt - 1)));
+    }
+
+    try {
+      const res = await fetch(url);
+      if (res.ok) return res;
+
+      const retriable = res.status >= 500 || res.status === 429;
+      if (!retriable || attempt === attempts - 1) return res;
+      lastError = new Error(`HTTP ${res.status}`);
+    } catch (err: any) {
+      lastError = err;
+      if (attempt === attempts - 1) throw err;
+    }
+  }
+
+  throw lastError || new Error('Request failed');
+}
+
+/** Turn a non-ok response into an Error carrying the server's message. */
+async function toError(res: Response, fallback: string): Promise<Error> {
+  const body = await res.json().catch(() => null);
+  const detail = body?.detail || body?.error;
+  if (res.status === 503) {
+    return new Error(detail || 'Immich is unreachable from the server right now.');
+  }
+  return new Error(detail || `${fallback} (HTTP ${res.status})`);
+}
+
 export function getThumbnailUrl(assetId: string, size: 'thumbnail' | 'preview' = 'thumbnail'): string {
   return `${BASE}/assets/${assetId}/thumbnail?size=${size}`;
 }
@@ -33,33 +78,38 @@ export function getOriginalUrl(assetId: string): string {
 }
 
 export async function fetchAlbums(): Promise<ImmichAlbum[]> {
-  const res = await fetch(`${BASE}/albums`);
-  if (!res.ok) throw new Error(`Failed to fetch albums: ${res.statusText}`);
-  return res.json();
+  const res = await fetchWithRetry(`${BASE}/albums`);
+  if (!res.ok) throw await toError(res, 'Failed to fetch albums');
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
 }
 
 export async function fetchAlbumAssets(albumId: string): Promise<{ assets: ImmichAsset[] } & ImmichAlbum> {
-  const res = await fetch(`${BASE}/albums/${albumId}`);
-  if (!res.ok) throw new Error(`Failed to fetch album: ${res.statusText}`);
+  const res = await fetchWithRetry(`${BASE}/albums/${albumId}`);
+  if (!res.ok) throw await toError(res, 'Failed to fetch album');
   const data = await res.json();
   return {
     ...data,
-    assets: data.assets || [],
+    assets: Array.isArray(data?.assets) ? data.assets : [],
   };
 }
 
 export async function fetchAssetInfo(assetId: string): Promise<ImmichAsset> {
-  const res = await fetch(`${BASE}/assets/${assetId}`);
-  if (!res.ok) throw new Error(`Failed to fetch asset info: ${res.statusText}`);
+  const res = await fetchWithRetry(`${BASE}/assets/${assetId}`);
+  if (!res.ok) throw await toError(res, 'Failed to fetch asset info');
   return res.json();
 }
 
 export async function fetchTimeline(page = 1, size = 60): Promise<ImmichAsset[]> {
-  const res = await fetch(`${BASE}/timeline?page=${page}&size=${size}`);
-  if (!res.ok) throw new Error(`Failed to fetch timeline: ${res.statusText}`);
+  const res = await fetchWithRetry(`${BASE}/timeline?page=${page}&size=${size}`);
+  if (!res.ok) throw await toError(res, 'Failed to fetch timeline');
   const data = await res.json();
-  // Handle both array and paginated response
-  return Array.isArray(data) ? data : (data.assets || data.items || []);
+  // The endpoint has returned a bare array and a paginated object at different
+  // times; tolerate both, and anything else becomes an empty list rather than a
+  // downstream "x.filter is not a function".
+  if (Array.isArray(data)) return data;
+  const items = data?.assets ?? data?.items;
+  return Array.isArray(items) ? items : [];
 }
 
 export async function uploadEditedImage(params: {

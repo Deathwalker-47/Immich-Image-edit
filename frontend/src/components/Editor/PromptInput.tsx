@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { LoraPicker } from './LoraPicker';
 
 const PRESET_PROMPTS = [
   { emoji: '🌅', label: 'Golden Hour', prompt: 'Transform to golden hour lighting with warm orange and golden tones, beautiful sunset ambiance' },
@@ -131,9 +132,12 @@ export function PromptInput({ onEdit, isEditing }: PromptInputProps) {
           <span className={`provider-dot${activeProviderInfo?.configured ? '' : ' offline'}`} />
           <span>{activeProviderInfo?.name || state.activeProvider}</span>
           <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>
-            {state.activeModel.split('/').pop()?.replace('flux-kontext-', 'kontext-') || state.activeModel}
+            {String(state.activeModel).split('/').pop()?.replace('flux-kontext-', 'kontext-') || state.activeModel}
           </span>
         </button>
+
+        {/* Renders only when the active model is LoRA-capable. */}
+        <LoraPicker />
 
         {/* Strength slider */}
         <div className="slider-wrap">

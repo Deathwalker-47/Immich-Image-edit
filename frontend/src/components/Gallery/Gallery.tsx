@@ -7,39 +7,56 @@ export function Gallery() {
   const [albums, setAlbums] = useState<ImmichAlbum[]>([]);
   const [assets, setAssets] = useState<ImmichAsset[]>([]);
   const [loading, setLoading] = useState(true);
-  const [albumLoading, setAlbumLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentAlbumName, setCurrentAlbumName] = useState('All Photos');
+  // A failed load has to be distinguishable from an empty album, otherwise the
+  // user sees "No photos found" and assumes the album is empty with no way back.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  const retry = () => setReloadToken(t => t + 1);
 
   // Load albums
   useEffect(() => {
     fetchAlbums()
       .then(setAlbums)
       .catch(err => addToast({ type: 'error', title: 'Failed to load albums', message: err.message }));
-  }, []);
+  }, [reloadToken]);
 
   // Load assets when album changes
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
+    setLoadError(null);
+
     const load = async () => {
       try {
         if (state.selectedAlbumId) {
           const data = await fetchAlbumAssets(state.selectedAlbumId);
-          setAssets(data.assets.filter((a: ImmichAsset) => a.type === 'IMAGE'));
-          setCurrentAlbumName(data.albumName);
+          if (cancelled) return;
+          setAssets((data.assets || []).filter((a: ImmichAsset) => a?.type === 'IMAGE'));
+          setCurrentAlbumName(data.albumName || 'Album');
         } else {
           const data = await fetchTimeline(1, 100);
-          setAssets(data.filter((a: ImmichAsset) => a.type === 'IMAGE'));
+          if (cancelled) return;
+          setAssets((data || []).filter((a: ImmichAsset) => a?.type === 'IMAGE'));
           setCurrentAlbumName('Recent Photos');
         }
       } catch (err: any) {
-        addToast({ type: 'error', title: 'Failed to load photos', message: err.message });
+        if (cancelled) return;
+        setAssets([]);
+        setLoadError(err?.message || 'Could not load photos');
+        addToast({ type: 'error', title: 'Failed to load photos', message: err?.message });
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
+
     load();
-  }, [state.selectedAlbumId]);
+    // Switching albums mid-flight would otherwise let a stale response overwrite
+    // the newer one.
+    return () => { cancelled = true; };
+  }, [state.selectedAlbumId, reloadToken]);
 
   const handleOpenEditor = (asset: ImmichAsset) => {
     const originalUrl = `/api/immich/assets/${asset.id}/original`;
@@ -147,6 +164,26 @@ export function Gallery() {
             {Array.from({ length: 20 }).map((_, i) => (
               <div key={i} className="photo-card skeleton" id={`skeleton-${i}`} />
             ))}
+          </div>
+        ) : loadError ? (
+          <div className="empty-state" id="gallery-error">
+            <div className="empty-state-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--error, #ef4444)" strokeWidth="1.5">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" x2="12" y1="8" y2="12" strokeLinecap="round"/>
+                <line x1="12" x2="12.01" y1="16" y2="16" strokeLinecap="round"/>
+              </svg>
+            </div>
+            <div className="empty-state-title">Couldn't load photos</div>
+            <div className="empty-state-desc" style={{ maxWidth: 420 }}>{loadError}</div>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={retry}
+              id="gallery-retry-btn"
+              style={{ marginTop: 'var(--space-3)' }}
+            >
+              Retry
+            </button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="empty-state">

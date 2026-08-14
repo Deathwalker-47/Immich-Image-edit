@@ -56,12 +56,14 @@ function HistoryItem({ step, index, isActive, onClick }: HistoryItemProps) {
     >
       <img
         src={step.imageUrl}
-        alt={step.label}
+        alt={step.label || 'Edit step'}
         loading="lazy"
         style={{ pointerEvents: 'none' }}
       />
       <div className="history-item-label">
-        {step.isOriginal ? '📷 Orig' : `#${index} ${step.provider.toUpperCase()}`}
+        {/* Defaulted, not trusted: an undefined provider here used to throw during
+            render and blank the entire app. */}
+        {step.isOriginal ? '📷 Orig' : `#${index} ${(step.provider || 'AI').toUpperCase()}`}
       </div>
     </div>
   );
