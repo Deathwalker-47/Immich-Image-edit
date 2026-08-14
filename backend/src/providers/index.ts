@@ -3,15 +3,21 @@ import { editWithRunware } from './runware';
 import { editWithReplicate } from './replicate';
 import { editWithAtlas } from './atlas';
 
+import { LoraSelection } from '../lora';
+
 export interface EditRequest {
   imageUrl?: string;
   imageBase64?: string;
   prompt: string;
   provider: string;
+  /** Canonical model id from models.ts (a raw provider slug is also accepted). */
   model?: string;
   strength?: number;
   negativePrompt?: string;
   steps?: number;
+  cfgScale?: number;
+  /** Only applied when the selected model is LoRA-capable. */
+  loras?: LoraSelection[];
 }
 
 export interface EditResult {
@@ -50,7 +56,7 @@ export interface AppSettings {
 export async function runEdit(request: EditRequest): Promise<EditResult> {
   const { provider } = request;
 
-  switch (provider.toLowerCase()) {
+  switch ((provider || '').toLowerCase()) {
     case 'fal':
       return editWithFal(request);
     case 'runware':
