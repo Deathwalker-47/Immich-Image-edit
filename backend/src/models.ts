@@ -81,6 +81,16 @@ export interface ModelVariant {
   maxReferenceImages: number;
   /** Atlas only — see ImageInputMode. */
   imageInput?: ImageInputMode;
+  /**
+   * Runware only. Some models take extra settings nested under
+   * `providerSettings.<key>` (e.g. `providerSettings.bfl.safetyTolerance`).
+   * Static values only — merged into the task as-is, not user-configurable per
+   * request. Used here to set each model's documented content-filtering dial to
+   * its most permissive value, the same pattern already used for Fal
+   * (`enable_safety_checker: false`) and Replicate (`disable_safety_checker: true`).
+   */
+  runwareProviderSettingsKey?: string;
+  runwareProviderSettings?: Record<string, unknown>;
 }
 
 export interface EditModel {
@@ -400,6 +410,164 @@ export const MODELS: EditModel[] = [
         supportsNegativePrompt: false,
         maxReferenceImages: 7,
         imageInput: { kind: 'single', field: 'image' },
+      },
+    },
+  },
+
+  // ---------------------------------------------------------------------
+  // Premium / higher-cost tier — Runware only, added on request as
+  // standalone alternatives to Kontext Dev that don't depend on LoRA support
+  // (which Runware doesn't have for Kontext Dev — see that model's note
+  // above). Each sets its documented content-filtering dial to the most
+  // permissive value it exposes, the same pattern already used for Fal
+  // (enable_safety_checker: false) and Replicate (disable_safety_checker:
+  // true). That is a provider-exposed setting, not a bypass of anything —
+  // OpenAI's GPT Image 2 in particular still enforces its own policy
+  // server-side regardless of the `moderation: "low"` request parameter, so
+  // it is the most conservatively filtered of the five even with that set.
+  // ---------------------------------------------------------------------
+  {
+    id: 'flux-kontext-pro',
+    name: 'FLUX Kontext Pro',
+    description: 'Hosted Kontext, better prompt adherence and detail than Dev. Pricier per edit.',
+    loraCapable: false,
+    providers: {
+      runware: {
+        slug: 'bfl:3@1',
+        verified: true,
+        note: 'Confirmed at runware.ai/docs/models/bfl-flux-1-kontext-pro. Up to 2 reference images, same 9 ' +
+          'fixed Kontext dimension pairs as Dev. No steps/CFGScale documented (matches Dev\'s pro/max behaviour). ' +
+          'providerSettings.bfl is flat — allowed keys are promptUpsampling, interval, raw, safetyTolerance ' +
+          'ONLY. A nested safety.checkContent object was tried first (per doc-summary research) and rejected ' +
+          'live with invalidProviderSettings naming the real key list; there is no separate checkContent field ' +
+          'for this model. safetyTolerance 0-6, 6=most permissive (already the documented default; sent ' +
+          'explicitly rather than relying on it staying that way).',
+        dimensions: KONTEXT_DIMENSIONS,
+        supportsSteps: false,
+        supportsCfg: false,
+        supportsNegativePrompt: false,
+        maxReferenceImages: 2,
+        runwareProviderSettingsKey: 'bfl',
+        runwareProviderSettings: { safetyTolerance: 6 },
+      },
+    },
+  },
+  {
+    id: 'flux-kontext-max',
+    name: 'FLUX Kontext Max',
+    description: 'Top-tier Kontext. Best identity retention of the family. Most expensive Kontext option.',
+    loraCapable: false,
+    providers: {
+      runware: {
+        slug: 'bfl:4@1',
+        verified: true,
+        note: 'Confirmed at runware.ai/docs/models/bfl-flux-1-kontext-max. $0.08 at 1024x1024. Same shape as ' +
+          'Kontext Pro otherwise (2 reference images, 9 fixed dimension pairs, no steps/CFGScale, flat ' +
+          'providerSettings.bfl.safetyTolerance — see Kontext Pro\'s note for the invalidProviderSettings ' +
+          'error a nested safety object produced live).',
+        dimensions: KONTEXT_DIMENSIONS,
+        supportsSteps: false,
+        supportsCfg: false,
+        supportsNegativePrompt: false,
+        maxReferenceImages: 2,
+        runwareProviderSettingsKey: 'bfl',
+        runwareProviderSettings: { safetyTolerance: 6 },
+      },
+    },
+  },
+  {
+    id: 'seedream-5-pro',
+    name: 'Seedream 5.0 Pro',
+    description: 'ByteDance flagship. Up to 10 reference images, precise local edits. Newer and pricier than 4.5.',
+    loraCapable: false,
+    providers: {
+      runware: {
+        slug: 'bytedance:seedream@5.0-pro',
+        verified: true,
+        note: 'Confirmed at runware.ai/docs/models/bytedance-seedream-5-0-pro. Area 921,600-4,624,220px (a ' +
+          'DIFFERENT band from Seedream 4.5\'s 3,686,400-16,777,216 — each model gets its own DimensionRule, ' +
+          'not a shared constant, on purpose). $0.048/image at 1.5K, $0.096 at 2K. Up to 10 reference images. ' +
+          'No content-filtering toggle for this model: providerSettings.bytedance was tried (per doc-summary ' +
+          'research suggesting a checkContent field) and rejected live with invalidProviderSettings — the real ' +
+          'allowed keys are maxSequentialImages, optimizePromptMode, byok, none of them safety-related. Runware ' +
+          'exposes no override for this model\'s content filtering; no steps/CFGScale documented either. ' +
+          'CAVEAT: the request shape itself is confirmed correct (passed validation cleanly both times, no 400), ' +
+          'but two live attempts both failed the same way — a genuine server-side 504 from Runware ' +
+          '(failedTaskTimeout, "results not received within the expected time window") at ~122s each time, not ' +
+          'a client-side timeout. Reads as Runware infrastructure load for this specific model rather than ' +
+          'anything fixable here; worth retrying at a different time rather than assuming it never works.',
+        dimensions: {
+          kind: 'range',
+          minEdge: 256,
+          maxEdge: 16383,
+          increment: 1,
+          minPixels: 921_600,
+          maxPixels: 4_624_220,
+        },
+        supportsSteps: false,
+        supportsCfg: false,
+        supportsNegativePrompt: false,
+        maxReferenceImages: 10,
+      },
+    },
+  },
+  {
+    id: 'gpt-image-2',
+    name: 'GPT Image 2',
+    description: 'OpenAI. Strong prompt adherence and text rendering. The most conservatively filtered of this group — OpenAI enforces its own policy independent of the moderation setting below.',
+    loraCapable: false,
+    providers: {
+      runware: {
+        slug: 'openai:gpt-image@2',
+        verified: true,
+        note: 'Confirmed via runware.ai/docs/models/openai-gpt-image-2. Width/height 16-3840px in 16px steps, ' +
+          'area 655,360-8,294,400px. Up to 16 reference images. providerSettings.openai.moderation: "low" is ' +
+          'the least-restrictive value Runware documents for this model, but OpenAI\'s own server-side policy ' +
+          'still applies regardless — this is the one model in this project where content-filtering is not ' +
+          'fully in the caller\'s control. quality:"high" for best output. No steps/CFGScale documented.',
+        dimensions: {
+          kind: 'range',
+          minEdge: 16,
+          maxEdge: 3840,
+          increment: 16,
+          minPixels: 655_360,
+          maxPixels: 8_294_400,
+        },
+        supportsSteps: false,
+        supportsCfg: false,
+        supportsNegativePrompt: false,
+        maxReferenceImages: 16,
+        runwareProviderSettingsKey: 'openai',
+        runwareProviderSettings: { moderation: 'low', quality: 'high' },
+      },
+    },
+  },
+  {
+    id: 'qwen-image-2-pro',
+    name: 'Qwen Image 2.0 Pro',
+    description: 'Alibaba. Optimized detail, layout and text accuracy for professional/enterprise-grade edits.',
+    loraCapable: false,
+    providers: {
+      runware: {
+        slug: 'alibaba:qwen-image@2.0-pro',
+        verified: true,
+        note: 'Confirmed at runware.ai/docs/models/alibaba-qwen-image-2-0-pro. Area cap 2,097,152px (2048x1024 ' +
+          'equivalent); docs note a temporary backend limit of 2048 on either edge, planned for removal — using ' +
+          '2048 as maxEdge for now rather than the area math\'s own higher ceiling, so a future Runware-side ' +
+          'relaxation just makes requests slightly less tight instead of requiring a code change. Up to 3 ' +
+          'reference images. No safety/moderation parameter was documented for this model — none added rather ' +
+          'than guessing one. No steps/CFGScale documented.',
+        dimensions: {
+          kind: 'range',
+          minEdge: 256,
+          maxEdge: 2048,
+          increment: 1,
+          maxPixels: 2_097_152,
+        },
+        supportsSteps: false,
+        supportsCfg: false,
+        supportsNegativePrompt: false,
+        maxReferenceImages: 3,
       },
     },
   },

@@ -137,6 +137,10 @@ export async function editWithRunware(request: EditRequest): Promise<EditResult>
     task.resolution = size.resolution;
   }
 
+  if (variant.runwareProviderSettingsKey && variant.runwareProviderSettings) {
+    task.providerSettings = { [variant.runwareProviderSettingsKey]: variant.runwareProviderSettings };
+  }
+
   if (variant.supportsSteps && request.steps) task.steps = request.steps;
   if (variant.supportsCfg && request.cfgScale) task.CFGScale = request.cfgScale;
   if (variant.supportsNegativePrompt && request.negativePrompt) {
