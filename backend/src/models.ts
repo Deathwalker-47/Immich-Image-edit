@@ -91,6 +91,17 @@ export interface ModelVariant {
    */
   runwareProviderSettingsKey?: string;
   runwareProviderSettings?: Record<string, unknown>;
+  /**
+   * Runware only. A distinct mechanism from the pair above: some models' extra
+   * settings sit directly on the task object, not nested under
+   * `providerSettings.<key>` — confirmed for Wan 2.7 Image Pro, whose docs say
+   * plainly "no providerSettings parameter appears... safety configuration is
+   * platform-level, not provider-specific," i.e. `task.safety.checkContent`
+   * rather than `task.providerSettings.alibaba.checkContent`. Kept separate from
+   * runwareProviderSettings rather than folding one into the other so each
+   * model's note can point at the one that's actually true for it.
+   */
+  runwareExtraFields?: Record<string, unknown>;
 }
 
 export interface EditModel {
@@ -512,33 +523,29 @@ export const MODELS: EditModel[] = [
     },
   },
   {
-    id: 'gpt-image-2',
-    name: 'GPT Image 2',
-    description: 'OpenAI. Strong prompt adherence and text rendering. The most conservatively filtered of this group — OpenAI enforces its own policy independent of the moderation setting below.',
+    id: 'wan-2-7-image-pro',
+    name: 'Wan 2.7 Image Pro',
+    description: 'Alibaba. Pro tier of the standard Wan 2.7 Image model — enhanced detail preservation and up to 9 reference images for complex, multi-element edits. Pricier than the base Wan 2.7 model already in the default set.',
     loraCapable: false,
     providers: {
       runware: {
-        slug: 'openai:gpt-image@2',
+        slug: 'alibaba:wan@2.7-image-pro',
         verified: true,
-        note: 'Confirmed via runware.ai/docs/models/openai-gpt-image-2. Width/height 16-3840px in 16px steps, ' +
-          'area 655,360-8,294,400px. Up to 16 reference images. providerSettings.openai.moderation: "low" is ' +
-          'the least-restrictive value Runware documents for this model, but OpenAI\'s own server-side policy ' +
-          'still applies regardless — this is the one model in this project where content-filtering is not ' +
-          'fully in the caller\'s control. quality:"high" for best output. No steps/CFGScale documented.',
-        dimensions: {
-          kind: 'range',
-          minEdge: 16,
-          maxEdge: 3840,
-          increment: 16,
-          minPixels: 655_360,
-          maxPixels: 8_294_400,
-        },
+        note: 'Confirmed at runware.ai/docs/models/alibaba-wan2-7-image-pro. Width/height 768-4096px in 16px ' +
+          'steps UNEDITED, but "with reference images: both width and height capped at 2048" — this app always ' +
+          'sends a reference image (it is an editor, never pure text-to-image), so 2048 is modelled as the real ' +
+          'maxEdge here rather than the unconstrained 4096. No area-total requirement documented, unlike ' +
+          'Seedream/GPT Image. Up to 9 reference images; also exposes settings.editRegions (bounding-box' +
+          '-targeted edits) which this project does not use. No steps/CFGScale. Distinct from the other four ' +
+          'premium models: safety.checkContent is a FLAT field directly on the task, not nested under ' +
+          'providerSettings — the docs say plainly no providerSettings parameter exists for this model, safety ' +
+          'is platform-level here rather than provider-specific (see runwareExtraFields in models.ts).',
+        dimensions: { kind: 'range', minEdge: 768, maxEdge: 2048, increment: 16 },
         supportsSteps: false,
         supportsCfg: false,
         supportsNegativePrompt: false,
-        maxReferenceImages: 16,
-        runwareProviderSettingsKey: 'openai',
-        runwareProviderSettings: { moderation: 'low', quality: 'high' },
+        maxReferenceImages: 9,
+        runwareExtraFields: { safety: { checkContent: false } },
       },
     },
   },

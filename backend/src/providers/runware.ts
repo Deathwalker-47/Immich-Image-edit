@@ -140,6 +140,9 @@ export async function editWithRunware(request: EditRequest): Promise<EditResult>
   if (variant.runwareProviderSettingsKey && variant.runwareProviderSettings) {
     task.providerSettings = { [variant.runwareProviderSettingsKey]: variant.runwareProviderSettings };
   }
+  if (variant.runwareExtraFields) {
+    Object.assign(task, variant.runwareExtraFields);
+  }
 
   if (variant.supportsSteps && request.steps) task.steps = request.steps;
   if (variant.supportsCfg && request.cfgScale) task.CFGScale = request.cfgScale;
