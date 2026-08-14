@@ -1,72 +1,112 @@
 import { Router, Request, Response } from 'express';
 import { runEdit } from '../providers';
+import { buildEnhancedPrompt, catalogueForUi } from '../lora';
+import { DEFAULT_MODEL_ID, DEFAULT_PROVIDER, ProviderId, getModel, isSupported } from '../models';
 
 const router = Router();
 
+const VALID_PROVIDERS: ProviderId[] = ['runware', 'fal', 'replicate', 'atlas'];
+
 /**
  * POST /api/edit
- * Body: {
- *   imageUrl: string,        // URL to the source image (must be accessible by backend)
- *   imageBase64?: string,    // Alternative: base64 encoded image
- *   prompt: string,          // Text description of the edit
- *   provider: string,        // 'fal' | 'runware' | 'replicate' | 'atlas'
- *   model?: string,          // Optional model override
- *   strength?: number,       // 0.1 - 1.0, default 0.75
- *   negativePrompt?: string, // What to avoid
- *   steps?: number,          // Inference steps (default 30)
- * }
+ *
+ * Body:
+ *   imageUrl | imageBase64  the source image (one is required)
+ *   prompt                  the edit instruction
+ *   provider                runware | fal | replicate | atlas
+ *   model                   canonical model id from models.ts
+ *   loras                   [{ id | url, weight? }] — LoRA-capable models only
+ *   strength, steps, cfgScale, negativePrompt   optional, applied where supported
  */
 router.post('/', async (req: Request, res: Response) => {
   const {
     imageUrl,
     imageBase64,
     prompt,
-    provider,
-    model,
-    strength = 0.75,
-    negativePrompt = 'blurry, low quality, artifacts, watermark',
-    steps = 30,
-  } = req.body;
+    provider = DEFAULT_PROVIDER,
+    model = DEFAULT_MODEL_ID,
+    strength,
+    negativePrompt,
+    steps,
+    cfgScale,
+    loras = [],
+  } = req.body || {};
 
-  if (!prompt) {
+  if (!prompt || !String(prompt).trim()) {
     res.status(400).json({ error: 'prompt is required' });
     return;
   }
-
   if (!imageUrl && !imageBase64) {
     res.status(400).json({ error: 'imageUrl or imageBase64 is required' });
     return;
   }
-
-  if (!provider) {
-    res.status(400).json({ error: 'provider is required (fal | runware | replicate | atlas)' });
+  if (!VALID_PROVIDERS.includes(provider)) {
+    res.status(400).json({ error: `Unknown provider "${provider}". Valid: ${VALID_PROVIDERS.join(' | ')}` });
+    return;
+  }
+  if (!isSupported(model, provider)) {
+    const known = getModel(model);
+    res.status(400).json({
+      error: known
+        ? `Model "${known.name}" is not available on ${provider}.`
+        : `Unknown model "${model}".`,
+    });
     return;
   }
 
+  // LoRAs only mean anything on a LoRA-capable model; silently ignoring them would
+  // leave the user wondering why their selection did nothing.
+  const modelInfo = getModel(model);
+  const selectedLoras = Array.isArray(loras) ? loras : [];
+  if (selectedLoras.length && !modelInfo?.loraCapable) {
+    res.status(400).json({
+      error: `Model "${modelInfo?.name || model}" does not support LoRAs. Use FLUX Kontext Dev LoRA.`,
+    });
+    return;
+  }
+
+  // Trigger words have to reach the model or the LoRA never activates.
+  const { prompt: finalPrompt, negativePrompt: loraNegative } = modelInfo?.loraCapable
+    ? buildEnhancedPrompt(String(prompt), selectedLoras)
+    : { prompt: String(prompt), negativePrompt: '' };
+
   try {
-    console.log(`[Edit] Starting edit — provider: ${provider}, model: ${model || 'default'}`);
-    console.log(`[Edit] Prompt: "${prompt.substring(0, 80)}..."`);
+    console.log(`[Edit] ${provider} / ${model}${selectedLoras.length ? ` + ${selectedLoras.length} LoRA(s)` : ''}`);
+    console.log(`[Edit] Prompt: "${finalPrompt.slice(0, 120)}"`);
 
     const result = await runEdit({
       imageUrl,
       imageBase64,
-      prompt,
+      prompt: finalPrompt,
       provider,
       model,
       strength,
-      negativePrompt,
+      negativePrompt: negativePrompt || loraNegative || undefined,
       steps,
+      cfgScale,
+      loras: selectedLoras,
     });
 
-    console.log(`[Edit] Success — provider: ${provider}`);
+    console.log(`[Edit] Success — ${provider} / ${result.model}`);
     res.json(result);
   } catch (err: any) {
-    console.error(`[Edit] Error with provider ${provider}:`, err.message);
-    res.status(500).json({
+    console.error(`[Edit] Failed on ${provider}:`, err.message);
+    // The frontend renders this string directly, so keep it human-readable.
+    res.status(502).json({
       error: err.message || 'Edit failed',
       provider,
+      model,
       details: err.response?.data || err.details || undefined,
     });
+  }
+});
+
+/** GET /api/edit/loras — catalogue for the LoRA picker, grouped by category. */
+router.get('/loras', (_req: Request, res: Response) => {
+  try {
+    res.json(catalogueForUi());
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 

@@ -1,114 +1,108 @@
 import { fal } from '@fal-ai/client';
 import { EditRequest, EditResult } from './index';
+import { resolveModel } from '../models';
+import { capForProvider, toReferences } from '../lora';
 
+/**
+ * Fal.ai provider.
+ *
+ * The endpoint slug comes from the registry rather than being pattern-matched out
+ * of the model string — guessing endpoint shapes from substrings is what produced
+ * the original "Not Found" errors.
+ *
+ * `enable_safety_checker: false` is deliberate and must not be removed: fal's NSFW
+ * filter returns a solid black image rather than an error, which reads as a broken
+ * edit.
+ */
 export async function editWithFal(request: EditRequest): Promise<EditResult> {
   const apiKey = process.env.FAL_KEY;
   if (!apiKey) throw new Error('FAL_KEY not configured');
 
   fal.config({ credentials: apiKey });
 
-  const model = request.model || 'fal-ai/flux-kontext/max';
+  const { model, variant } = resolveModel(request.model, 'fal');
   const imageUrl = await resolveImageUrl(request);
 
-  let result: any;
+  const input: Record<string, any> = {
+    prompt: request.prompt,
+    image_url: imageUrl,
+    num_images: 1,
+    output_format: 'jpeg',
+    enable_safety_checker: false,
+  };
+
+  if (variant.supportsSteps && request.steps) input.num_inference_steps = request.steps;
+  if (variant.supportsCfg && request.cfgScale) input.guidance_scale = request.cfgScale;
+  if (variant.supportsNegativePrompt && request.negativePrompt) {
+    input.negative_prompt = request.negativePrompt;
+  }
+  // Kontext edits from the instruction; strength only applies to true img2img models.
+  if (request.strength !== undefined && !model.id.startsWith('flux-kontext')) {
+    input.strength = request.strength;
+  }
+
+  if (model.loraCapable && request.loras?.length) {
+    const selected = capForProvider(toReferences(request.loras), 'fal');
+    if (selected.length) {
+      input.loras = selected.map((lora) => ({ path: lora.ref, scale: lora.weight }));
+      console.log(`[Fal] Applying ${selected.length} LoRA(s)`);
+    }
+  }
 
   try {
-    // FLUX Kontext models — in-context text editing
-    if (model.includes('flux-kontext') || model.includes('kontext')) {
-      result = await fal.subscribe(model, {
-        input: {
-          prompt: request.prompt,
-          image_url: imageUrl,
-          strength: request.strength ?? 0.75,
-          num_inference_steps: request.steps ?? 30,
-          guidance_scale: 3.5,
-          output_format: 'jpeg',
-          num_images: 1,
-          enable_safety_checker: false,
-        },
-        logs: false,
-      });
-    } else if (model.includes('stable-diffusion')) {
-      // Stable Diffusion models — use image-to-image endpoint variant
-      // SD3 Medium needs the /image-to-image endpoint suffix
-      const img2imgModel = model.endsWith('/image-to-image')
-        ? model
-        : `${model}/image-to-image`;
-      
-      result = await fal.subscribe(img2imgModel, {
-        input: {
-          prompt: request.prompt,
-          image_url: imageUrl,
-          strength: request.strength ?? 0.7,
-          negative_prompt: request.negativePrompt || 'blurry, low quality, artifacts',
-          num_inference_steps: request.steps ?? 28,
-          guidance_scale: 7.5,
-          num_images: 1,
-          enable_safety_checker: false,
-        },
-        logs: false,
-      });
-    } else {
-      // Generic image-to-image fallback
-      result = await fal.subscribe(model, {
-        input: {
-          prompt: request.prompt,
-          image_url: imageUrl,
-          negative_prompt: request.negativePrompt,
-          strength: request.strength ?? 0.75,
-          num_inference_steps: request.steps ?? 30,
-          num_images: 1,
-          enable_safety_checker: false,
-        },
-        logs: false,
-      });
-    }
+    console.log(`[Fal] ${model.name} -> ${variant.slug}`);
+    const result: any = await fal.subscribe(variant.slug, { input, logs: false });
 
-    const output = result.data || result;
+    const output = result?.data || result;
     const outputImage = output?.images?.[0] || output?.image;
-
     if (!outputImage) {
-      throw new Error('No image in Fal.ai response: ' + JSON.stringify(output).substring(0, 300));
+      throw new Error(`No image in response: ${JSON.stringify(output).slice(0, 300)}`);
     }
 
-    const imageUrlOut = typeof outputImage === 'string' ? outputImage : outputImage.url;
+    const url = typeof outputImage === 'string' ? outputImage : outputImage.url;
+    if (!url) {
+      throw new Error(`No image URL in response: ${JSON.stringify(outputImage).slice(0, 300)}`);
+    }
 
     return {
-      imageUrl: imageUrlOut,
+      imageUrl: url,
       provider: 'fal',
-      model,
+      model: variant.slug,
       width: outputImage.width,
       height: outputImage.height,
     };
   } catch (err: any) {
-    throw new Error(`Fal.ai edit failed: ${err.message || JSON.stringify(err)}`);
+    const detail = err?.body ? JSON.stringify(err.body).slice(0, 300) : err.message || JSON.stringify(err);
+    // A 404 here almost always means the registry slug is stale.
+    if (String(detail).includes('404') || /not found/i.test(String(detail))) {
+      throw new Error(
+        `Fal endpoint "${variant.slug}" was not found. Confirm the slug at fal.ai/explore and update models.ts. (${detail})`
+      );
+    }
+    throw new Error(`Fal.ai edit failed: ${detail}`);
   }
 }
 
 async function resolveImageUrl(request: EditRequest): Promise<string> {
   if (request.imageUrl) {
-    // If internal URL, fetch and upload to fal storage
+    // fal can't reach our internal host, so upload the bytes to fal storage.
     if (request.imageUrl.startsWith('/') || request.imageUrl.startsWith('http://localhost')) {
       const internalUrl = request.imageUrl.startsWith('/')
         ? `http://localhost:${process.env.PORT || 3778}${request.imageUrl}`
         : request.imageUrl;
       const res = await fetch(internalUrl);
       if (!res.ok) throw new Error(`Failed to fetch internal image: ${res.status}`);
-      const arrayBuf = await res.arrayBuffer();
-      const buffer = Buffer.from(arrayBuf);
-      const blob = new Blob([buffer], { type: 'image/jpeg' });
-      const uploaded = await fal.storage.upload(blob);
-      return uploaded;
+      const buffer = Buffer.from(await res.arrayBuffer());
+      return fal.storage.upload(new Blob([buffer], { type: 'image/jpeg' }));
     }
     return request.imageUrl;
   }
+
   if (request.imageBase64) {
-    // Upload to fal storage for base64 images
     const base64Data = request.imageBase64.replace(/^data:image\/\w+;base64,/, '');
     const buffer = Buffer.from(base64Data, 'base64');
-    const blob = new Blob([buffer], { type: 'image/jpeg' });
-    const uploaded = await fal.storage.upload(blob);
-    return uploaded;
+    return fal.storage.upload(new Blob([buffer], { type: 'image/jpeg' }));
   }
+
   throw new Error('No image URL or base64 provided');
 }
