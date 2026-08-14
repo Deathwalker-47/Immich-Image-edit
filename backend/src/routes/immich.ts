@@ -1,0 +1,207 @@
+import { Router, Request, Response } from 'express';
+import axios from 'axios';
+import FormData from 'form-data';
+
+const router = Router();
+
+const getImmichClient = () => {
+  const baseURL = process.env.IMMICH_INTERNAL_URL || 'http://immich-server:2283';
+  const apiKey = process.env.IMMICH_API_KEY || '';
+  return axios.create({
+    baseURL: `${baseURL}/api`,
+    headers: {
+      'x-api-key': apiKey,
+      'Accept': 'application/json',
+    },
+    timeout: 30000,
+  });
+};
+
+// GET /api/immich/albums — list all albums
+router.get('/albums', async (_req: Request, res: Response) => {
+  try {
+    const client = getImmichClient();
+    const { data } = await client.get('/albums');
+    res.json(data);
+  } catch (err: any) {
+    console.error('[Immich] GET /albums error:', err.message);
+    res.status(err.response?.status || 500).json({ error: err.message });
+  }
+});
+
+// GET /api/immich/albums/:id — album with assets
+router.get('/albums/:id', async (req: Request, res: Response) => {
+  try {
+    const client = getImmichClient();
+    const { data } = await client.get(`/albums/${req.params.id}?withoutAssets=false`);
+    res.json(data);
+  } catch (err: any) {
+    console.error('[Immich] GET /albums/:id error:', err.message);
+    res.status(err.response?.status || 500).json({ error: err.message });
+  }
+});
+
+// GET /api/immich/timeline — get recent assets
+router.get('/timeline', async (req: Request, res: Response) => {
+  try {
+    const client = getImmichClient();
+    const page = req.query.page || 1;
+    const size = req.query.size || 50;
+    const { data } = await client.get(`/assets?page=${page}&size=${size}&order=desc`);
+    res.json(data);
+  } catch (err: any) {
+    console.error('[Immich] GET /timeline error:', err.message);
+    res.status(err.response?.status || 500).json({ error: err.message });
+  }
+});
+
+// GET /api/immich/assets/:id — asset info
+router.get('/assets/:id', async (req: Request, res: Response) => {
+  try {
+    const client = getImmichClient();
+    const { data } = await client.get(`/assets/${req.params.id}`);
+    res.json(data);
+  } catch (err: any) {
+    console.error('[Immich] GET /assets/:id error:', err.message);
+    res.status(err.response?.status || 500).json({ error: err.message });
+  }
+});
+
+// GET /api/immich/assets/:id/thumbnail — proxy thumbnail
+router.get('/assets/:id/thumbnail', async (req: Request, res: Response) => {
+  try {
+    const client = getImmichClient();
+    const size = req.query.size || 'thumbnail';
+    const response = await client.get(`/assets/${req.params.id}/thumbnail?size=${size}`, {
+      responseType: 'stream',
+    });
+    res.set('Content-Type', (response.headers['content-type'] as string) || 'image/jpeg');
+    res.set('Cache-Control', 'public, max-age=86400');
+    response.data.pipe(res);
+  } catch (err: any) {
+    console.error('[Immich] GET thumbnail error:', err.message);
+    res.status(err.response?.status || 500).json({ error: err.message });
+  }
+});
+
+// GET /api/immich/assets/:id/original — proxy original image
+router.get('/assets/:id/original', async (req: Request, res: Response) => {
+  try {
+    const client = getImmichClient();
+    const response = await client.get(`/assets/${req.params.id}/original`, {
+      responseType: 'arraybuffer',
+      timeout: 60000,
+    });
+    const contentType = (response.headers['content-type'] as string) || 'image/jpeg';
+    res.set('Content-Type', contentType);
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(Buffer.from(response.data));
+  } catch (err: any) {
+    console.error('[Immich] GET original error:', err.message);
+    res.status(err.response?.status || 500).json({ error: err.message });
+  }
+});
+
+// POST /api/immich/upload — upload edited image back to Immich
+router.post('/upload', async (req: Request, res: Response) => {
+  try {
+    const { imageBase64, filename, albumId, deviceAssetId } = req.body;
+
+    if (!imageBase64) {
+      res.status(400).json({ error: 'imageBase64 is required' });
+      return;
+    }
+
+    const client = getImmichClient();
+
+    // Convert base64 to buffer
+    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+    const imageBuffer = Buffer.from(base64Data, 'base64');
+
+    // Determine content type
+    const mimeMatch = imageBase64.match(/^data:(image\/\w+);base64,/);
+    const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    const ext = mimeType.split('/')[1];
+
+    const assetFilename = filename || `ai-edit-${Date.now()}.${ext}`;
+    const assetDeviceId = deviceAssetId || `immich-ai-editor-${Date.now()}`;
+
+    const formData = new FormData();
+    formData.append('assetData', imageBuffer, {
+      filename: assetFilename,
+      contentType: mimeType,
+    });
+    formData.append('deviceAssetId', assetDeviceId);
+    formData.append('deviceId', 'immich-ai-editor');
+    formData.append('fileCreatedAt', new Date().toISOString());
+    formData.append('fileModifiedAt', new Date().toISOString());
+    formData.append('isFavorite', 'false');
+
+    const uploadResponse = await client.post('/assets', formData, {
+      headers: {
+        ...formData.getHeaders(),
+      },
+      maxBodyLength: Infinity,
+    });
+
+    const newAssetId = uploadResponse.data.id;
+
+    // If albumId specified, add to that album
+    if (albumId && newAssetId) {
+      try {
+        await client.put(`/albums/${albumId}/assets`, { ids: [newAssetId] });
+      } catch (albumErr: any) {
+        console.warn('[Immich] Could not add to album:', albumErr.message);
+      }
+    } else if (newAssetId) {
+      // Try to add to AI Edits album
+      await ensureAndAddToAiEditsAlbum(client, newAssetId);
+    }
+
+    res.json({ success: true, assetId: newAssetId, data: uploadResponse.data });
+  } catch (err: any) {
+    console.error('[Immich] POST /upload error:', err.message, err.response?.data);
+    res.status(err.response?.status || 500).json({ error: err.message });
+  }
+});
+
+async function ensureAndAddToAiEditsAlbum(client: ReturnType<typeof getImmichClient>, assetId: string) {
+  const albumName = process.env.AI_EDITS_ALBUM_NAME || 'AI Edits';
+  try {
+    const { data: albums } = await client.get('/albums');
+    let aiAlbum = albums.find((a: any) => a.albumName === albumName);
+
+    if (!aiAlbum) {
+      const { data: created } = await client.post('/albums', {
+        albumName,
+        description: 'Photos edited with Immich AI Photo Editor',
+      });
+      aiAlbum = created;
+    }
+
+    if (aiAlbum?.id) {
+      await client.put(`/albums/${aiAlbum.id}/assets`, { ids: [assetId] });
+    }
+  } catch (err: any) {
+    console.warn('[Immich] ensureAndAddToAiEditsAlbum error:', err.message);
+  }
+}
+
+// GET /api/immich/search — search assets
+router.get('/search', async (req: Request, res: Response) => {
+  try {
+    const client = getImmichClient();
+    const { q, page = 1, size = 50 } = req.query;
+    const { data } = await client.post('/search/smart', {
+      query: q,
+      page: Number(page),
+      size: Number(size),
+    });
+    res.json(data);
+  } catch (err: any) {
+    console.error('[Immich] GET /search error:', err.message);
+    res.status(err.response?.status || 500).json({ error: err.message });
+  }
+});
+
+export { router as immichRouter };

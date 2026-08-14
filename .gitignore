@@ -1,0 +1,29 @@
+# Environment
+.env
+.env.local
+
+# Node
+node_modules/
+dist/
+build/
+
+# Backend
+backend/node_modules/
+backend/dist/
+backend/data/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Docker
+.docker/
+
+# Misc
+.DS_Store
+*.log
+
+# Large artifacts / separate repo
+Immich-Mobile-App.apk
+Immich-Mobile-App.rar
+immich-mobile-fork/
