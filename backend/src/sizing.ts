@@ -95,7 +95,26 @@ function fitRange(
   let finalWidth = snap(width, increment, minEdge, maxEdge);
   let finalHeight = snap(height, increment, minEdge, maxEdge);
 
-  // Snapping and clamping can nudge the area back under the floor. Step both
+  // The pre-snap width/height were scaled so their (floating-point) product sits
+  // right at the area ceiling. snap() then rounds each dimension independently —
+  // two roundings in the same direction can push the *integer* product back over
+  // maxPixels even though the float product was exactly on the boundary. Confirmed
+  // live against Seedream 4.5 on Runware: 4730x3547 = 16,777,310, 94px over a
+  // 16,777,216 ceiling, rejected as invalidPixels. Step both dimensions back down
+  // until the integer area is legal again.
+  if (maxPixels) {
+    let guard = 0;
+    while (finalWidth * finalHeight > maxPixels && guard < 512) {
+      const nextWidth = Math.max(finalWidth - increment, minEdge);
+      const nextHeight = Math.max(finalHeight - increment, minEdge);
+      if (nextWidth === finalWidth && nextHeight === finalHeight) break;
+      finalWidth = nextWidth;
+      finalHeight = nextHeight;
+      guard += 1;
+    }
+  }
+
+  // Snapping and clamping can also nudge the area back under the floor. Step both
   // dimensions up until the area is legal or we run out of headroom.
   if (minPixels) {
     let guard = 0;

@@ -144,13 +144,27 @@ export async function editWithRunware(request: EditRequest): Promise<EditResult>
   }
 
   // ---- LoRAs (Kontext LoRA variants only) --------------------------------
+  //
+  // If the user asked for LoRAs, every one of them failing to resolve must not
+  // be allowed to silently fall through to a plain edit — that used to happen
+  // here and is worse than an error: the response still says 200 with a real
+  // image, so the caller has no way to know the LoRA was silently dropped.
+  // Confirmed live against a genuine Runware platform limitation (see
+  // uploadLoraToRunware's architecture comment): runware:106@1 (Kontext Dev)
+  // rejects flux1d-tagged LoRAs at inference time with 'unsupportedLoraModel',
+  // regardless of upload metadata — there is no retry that fixes this from here.
   if (model.loraCapable && request.loras?.length) {
     const selected = capForProvider(toReferences(request.loras), 'runware');
     const resolved = await resolveRunwareLoras(selected, apiKey);
-    if (resolved.length) {
-      task.lora = resolved.map((lora) => ({ model: lora.ref, weight: lora.weight }));
-      console.log(`[Runware] Applying ${resolved.length} LoRA(s)`);
+    if (!resolved.length) {
+      throw new Error(
+        `Runware could not apply any of the requested LoRA(s) to ${variant.slug}. This is a known ` +
+        `platform limitation — Runware currently rejects LoRAs on FLUX Kontext Dev at inference time ` +
+        `even when the upload itself succeeds. Try Replicate or Atlas for LoRA edits instead.`
+      );
     }
+    task.lora = resolved.map((lora) => ({ model: lora.ref, weight: lora.weight }));
+    console.log(`[Runware] Applying ${resolved.length} LoRA(s)`);
   }
 
   // ---- Call ---------------------------------------------------------------
@@ -177,6 +191,10 @@ export async function editWithRunware(request: EditRequest): Promise<EditResult>
   const taskError = errorTextFrom(body);
   if (taskError) throw new Error(`Runware error: ${taskError}`);
 
+  return extractResult(body, inferenceUUID, variant.slug);
+}
+
+function extractResult(body: any, inferenceUUID: string, modelSlug: string): EditResult {
   const results = Array.isArray(body) ? body : body?.data || [];
   const result = results.find(
     (item: any) => item?.taskUUID === inferenceUUID || item?.taskType === 'imageInference'
@@ -196,7 +214,7 @@ export async function editWithRunware(request: EditRequest): Promise<EditResult>
   return {
     imageUrl: outputUrl,
     provider: 'runware',
-    model: variant.slug,
+    model: modelSlug,
     width: result.width,
     height: result.height,
     seed: result.seed,

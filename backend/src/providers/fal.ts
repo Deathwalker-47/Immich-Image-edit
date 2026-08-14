@@ -21,35 +21,41 @@ export async function editWithFal(request: EditRequest): Promise<EditResult> {
   fal.config({ credentials: apiKey });
 
   const { model, variant } = resolveModel(request.model, 'fal');
-  const imageUrl = await resolveImageUrl(request);
 
-  const input: Record<string, any> = {
-    prompt: request.prompt,
-    image_url: imageUrl,
-    num_images: 1,
-    output_format: 'jpeg',
-    enable_safety_checker: false,
-  };
-
-  if (variant.supportsSteps && request.steps) input.num_inference_steps = request.steps;
-  if (variant.supportsCfg && request.cfgScale) input.guidance_scale = request.cfgScale;
-  if (variant.supportsNegativePrompt && request.negativePrompt) {
-    input.negative_prompt = request.negativePrompt;
-  }
-  // Kontext edits from the instruction; strength only applies to true img2img models.
-  if (request.strength !== undefined && !model.id.startsWith('flux-kontext')) {
-    input.strength = request.strength;
-  }
-
-  if (model.loraCapable && request.loras?.length) {
-    const selected = capForProvider(toReferences(request.loras), 'fal');
-    if (selected.length) {
-      input.loras = selected.map((lora) => ({ path: lora.ref, scale: lora.weight }));
-      console.log(`[Fal] Applying ${selected.length} LoRA(s)`);
-    }
-  }
-
+  // Everything that can make a fal API call — including resolveImageUrl, which
+  // calls fal.storage.upload for base64 input — has to be inside this try block.
+  // It previously wasn't: a locked-account 403 from the upload step propagated as
+  // a bare "Forbidden" with none of the detail-extraction below, because it threw
+  // before the try started. Confirmed live against an exhausted-balance account.
   try {
+    const imageUrl = await resolveImageUrl(request);
+
+    const input: Record<string, any> = {
+      prompt: request.prompt,
+      image_url: imageUrl,
+      num_images: 1,
+      output_format: 'jpeg',
+      enable_safety_checker: false,
+    };
+
+    if (variant.supportsSteps && request.steps) input.num_inference_steps = request.steps;
+    if (variant.supportsCfg && request.cfgScale) input.guidance_scale = request.cfgScale;
+    if (variant.supportsNegativePrompt && request.negativePrompt) {
+      input.negative_prompt = request.negativePrompt;
+    }
+    // Kontext edits from the instruction; strength only applies to true img2img models.
+    if (request.strength !== undefined && !model.id.startsWith('flux-kontext')) {
+      input.strength = request.strength;
+    }
+
+    if (model.loraCapable && request.loras?.length) {
+      const selected = capForProvider(toReferences(request.loras), 'fal');
+      if (selected.length) {
+        input.loras = selected.map((lora) => ({ path: lora.ref, scale: lora.weight }));
+        console.log(`[Fal] Applying ${selected.length} LoRA(s)`);
+      }
+    }
+
     console.log(`[Fal] ${model.name} -> ${variant.slug}`);
     const result: any = await fal.subscribe(variant.slug, { input, logs: false });
 
@@ -72,9 +78,22 @@ export async function editWithFal(request: EditRequest): Promise<EditResult> {
       height: outputImage.height,
     };
   } catch (err: any) {
-    const detail = err?.body ? JSON.stringify(err.body).slice(0, 300) : err.message || JSON.stringify(err);
+    // Confirmed live: fal's client throws with the real reason under
+    // err.body.detail (e.g. "User is locked. Reason: Exhausted balance...") —
+    // that used to get flattened into an opaque "Forbidden" by JSON.stringify
+    // truncation ordering. Surface it directly when present.
+    const bodyDetail = err?.body?.detail;
+    const detail = typeof bodyDetail === 'string'
+      ? bodyDetail
+      : err?.body
+        ? JSON.stringify(err.body).slice(0, 300)
+        : err.message || JSON.stringify(err);
+
+    if (err?.status === 403 || /locked|balance|forbidden/i.test(String(detail))) {
+      throw new Error(`Fal account issue: ${detail}`);
+    }
     // A 404 here almost always means the registry slug is stale.
-    if (String(detail).includes('404') || /not found/i.test(String(detail))) {
+    if (err?.status === 404 || /not found/i.test(String(detail))) {
       throw new Error(
         `Fal endpoint "${variant.slug}" was not found. Confirm the slug at fal.ai/explore and update models.ts. (${detail})`
       );

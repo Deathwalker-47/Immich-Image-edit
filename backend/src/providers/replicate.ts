@@ -20,26 +20,41 @@ export async function editWithReplicate(request: EditRequest): Promise<EditResul
   const { model, variant } = resolveModel(request.model, 'replicate');
   const inputImage = await resolveInputImage(request);
 
+  // Field names confirmed against the live, authenticated Cog schema for both
+  // black-forest-labs/flux-kontext-dev and flux-kontext-dev-lora (fetched via
+  // GET /v1/models/{owner}/{name}, which requires auth — unauthenticated requests
+  // 404 rather than exposing the schema). Two of the original guesses were wrong:
+  // `guidance_scale` isn't a field on either model (it's `guidance`), and
+  // `safety_tolerance` isn't either (it's `disable_safety_checker`) — Cog silently
+  // drops unrecognised top-level fields rather than rejecting the request, so both
+  // wrong names were being ignored, defaulting the safety filter back on.
   const input: Record<string, any> = {
     prompt: request.prompt,
     input_image: inputImage,
     output_format: 'jpg',
     output_quality: 95,
-    // Least-restrictive setting the API allows; the project prioritises unfiltered output.
-    safety_tolerance: 5,
+    disable_safety_checker: true,
+    // Both models accept this; the LoRA variant's own default is a fixed "1:1"
+    // crop rather than the plain model's "match_input_image" — set explicitly so
+    // both variants preserve the source aspect the same way.
+    aspect_ratio: 'match_input_image',
   };
 
   if (variant.supportsSteps && request.steps) input.num_inference_steps = request.steps;
-  if (variant.supportsCfg && request.cfgScale) input.guidance_scale = request.cfgScale;
-  if (variant.supportsNegativePrompt && request.negativePrompt) {
-    input.negative_prompt = request.negativePrompt;
-  }
+  if (variant.supportsCfg && request.cfgScale) input.guidance = request.cfgScale;
 
   if (model.loraCapable && request.loras?.length) {
     const selected = capForProvider(toReferences(request.loras), 'replicate');
     if (selected.length) {
+      // Confirmed via the same schema fetch: `lora_weights` (URL/HF path) and
+      // `lora_strength` (not `lora_scale`, which is the sibling flux-dev-lora
+      // model's field name — the Kontext LoRA model uses a different one).
+      // Sending the wrong field previously reached the model with no LoRA
+      // actually loaded and crashed inside its own weight-quantization code
+      // ("cannot access local variable 'weight_is_f8'") rather than failing
+      // cleanly — confirmed live.
       input.lora_weights = selected[0].ref;
-      input.lora_scale = selected[0].weight;
+      input.lora_strength = selected[0].weight;
       console.log(`[Replicate] Applying 1 LoRA: ${selected[0].ref}`);
     }
   }

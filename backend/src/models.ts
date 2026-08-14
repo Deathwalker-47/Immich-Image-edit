@@ -54,6 +54,15 @@ export type DimensionRule =
       /** Send no size at all and let the provider mirror the input. */
     };
 
+/**
+ * How a model's input image(s) are sent. Only Atlas varies this per model — Fal,
+ * Runware and Replicate use one convention across their whole catalogue, so their
+ * provider files hardcode it directly rather than reading it from here.
+ */
+export type ImageInputMode =
+  | { kind: 'single'; field: string }
+  | { kind: 'array'; field: string; max: number };
+
 export interface ModelVariant {
   /** The provider-specific model identifier (AIR id, endpoint slug, etc). */
   slug: string;
@@ -70,6 +79,8 @@ export interface ModelVariant {
   supportsNegativePrompt: boolean;
   /** Max reference/input images the model accepts. */
   maxReferenceImages: number;
+  /** Atlas only — see ImageInputMode. */
+  imageInput?: ImageInputMode;
 }
 
 export interface EditModel {
@@ -122,8 +133,10 @@ export const MODELS: EditModel[] = [
       },
       fal: {
         slug: 'fal-ai/flux-kontext/dev',
-        verified: false,
-        note: 'VERIFY against fal.ai/explore before trusting.',
+        verified: true,
+        note: 'Confirmed live at fal.ai/models/fal-ai/flux-kontext/dev/api. Fields: image_url, prompt, ' +
+          'num_inference_steps (default 28), guidance_scale (default 2.5), resolution_mode ' +
+          '(default match_input — output already mirrors the source, no explicit sizing needed).',
         dimensions: { kind: 'provider-default' },
         supportsSteps: true,
         supportsCfg: true,
@@ -132,13 +145,29 @@ export const MODELS: EditModel[] = [
       },
       replicate: {
         slug: 'black-forest-labs/flux-kontext-dev',
-        verified: false,
-        note: 'Model family confirmed to exist on Replicate; exact slug still to be confirmed.',
+        verified: true,
+        note: 'Live end-to-end test passed. Schema fetched via the authenticated GET /v1/models/{owner}/{name} ' +
+          '(unauthenticated requests 404 rather than exposing it). Fields: input_image, prompt, guidance ' +
+          '(not guidance_scale), disable_safety_checker (not safety_tolerance), aspect_ratio ' +
+          '(default match_input_image — no width/height needed), num_inference_steps.',
         dimensions: { kind: 'provider-default' },
         supportsSteps: true,
         supportsCfg: true,
         supportsNegativePrompt: false,
         maxReferenceImages: 1,
+      },
+      atlas: {
+        slug: 'black-forest-labs/flux-kontext-dev',
+        verified: true,
+        note: 'Live end-to-end test passed. Confirmed at atlascloud.ai/docs/more-models/black-forest-labs/' +
+          'flux-kontext-dev/generateImage. $0.025/image. guidance_scale 1-20 (default 2.5), ' +
+          'num_inference_steps 1-50 (default 28).',
+        dimensions: { kind: 'provider-default' },
+        supportsSteps: true,
+        supportsCfg: true,
+        supportsNegativePrompt: false,
+        maxReferenceImages: 1,
+        imageInput: { kind: 'single', field: 'image' },
       },
     },
   },
@@ -152,7 +181,18 @@ export const MODELS: EditModel[] = [
         // Runware has no separate LoRA endpoint — it is the base model plus a lora array.
         slug: 'runware:106@1',
         verified: true,
-        note: 'Kontext Dev base plus a lora[] array of AIR ids.',
+        note: 'KNOWN PLATFORM LIMITATION, confirmed live: Runware rejects every LoRA tested against this base ' +
+          'model with unsupportedLoraModel, even a freshly-uploaded, correctly-tagged (architecture: flux1d — ' +
+          'the only FLUX option in Runware\'s own architecture enum, confirmed by deliberately sending an ' +
+          'invalid value and reading back the full allowedValues list) LoRA. This is not a stale-cache problem ' +
+          '(self-heal for the 7 hand-made bad AIRs still applies and is unrelated) and not fixable from the ' +
+          'client side — Kontext\'s extra reference-image conditioning appears to make Runware treat it as ' +
+          'incompatible with flux1d LoRAs at inference time, regardless of what BFL says elsewhere about ' +
+          'FLUX.1-dev LoRAs loading on Kontext with a quality tradeoff (true on e.g. ComfyUI/diffusers, not ' +
+          'true on Runware\'s platform). edit() throws a clear error rather than silently dropping the LoRA and ' +
+          'returning an unmodified-by-LoRA edit as if it had succeeded — that silent-drop was the initial, ' +
+          'more dangerous failure mode before this was understood. Replicate and Atlas both apply LoRAs to this ' +
+          'same model family successfully; prefer them for LoRA edits until/unless Runware changes this.',
         dimensions: KONTEXT_DIMENSIONS,
         supportsSteps: true,
         supportsCfg: true,
@@ -162,7 +202,8 @@ export const MODELS: EditModel[] = [
       fal: {
         slug: 'fal-ai/flux-kontext-lora',
         verified: true,
-        note: 'Confirmed present in the fal catalogue as a Kontext dev + LoRA image-to-image endpoint.',
+        note: 'Confirmed live at fal.ai/models/fal-ai/flux-kontext-lora/api, built on FLUX.1 Kontext [dev]. ' +
+          'Fields: image_url, prompt, loras (array).',
         dimensions: { kind: 'provider-default' },
         supportsSteps: true,
         supportsCfg: true,
@@ -171,13 +212,30 @@ export const MODELS: EditModel[] = [
       },
       replicate: {
         slug: 'black-forest-labs/flux-kontext-dev-lora',
-        verified: false,
-        note: 'VERIFY on replicate.com before trusting.',
+        verified: true,
+        note: 'Schema fetched via the authenticated model API. Fields: input_image, prompt, lora_weights, ' +
+          'lora_strength (NOT hf_lora/lora_scale — that was the sibling flux-dev-lora model\'s convention, ' +
+          'different from this one). Confirmed live: the wrong field names reached the model with no LoRA ' +
+          'loaded and crashed inside its own weight-quantization code rather than failing cleanly.',
         dimensions: { kind: 'provider-default' },
         supportsSteps: true,
         supportsCfg: true,
         supportsNegativePrompt: false,
         maxReferenceImages: 1,
+      },
+      atlas: {
+        slug: 'black-forest-labs/flux-kontext-dev-lora',
+        verified: true,
+        note: 'Live-tested. The "-ultra-fast" variant has its own full docs page and looked like the safer bet ' +
+          'sight-unseen, but the live API rejects it ({"code":400,"msg":"not found"}) — a docs page existing is ' +
+          'not the same as the API recognising the slug as a "model" value. This plain slug is the one that ' +
+          'actually resolves. Fields: image, loras (array, max 3).',
+        dimensions: { kind: 'provider-default' },
+        supportsSteps: true,
+        supportsCfg: true,
+        supportsNegativePrompt: false,
+        maxReferenceImages: 1,
+        imageInput: { kind: 'single', field: 'image' },
       },
     },
   },
@@ -190,7 +248,8 @@ export const MODELS: EditModel[] = [
       runware: {
         slug: 'bytedance:seedream@4.5',
         verified: true,
-        note: 'Confirmed in Runware model docs. Area must be 3.69-16.78MP — this is the model that produced invalidPixels at 1024x1024. No steps/CFGScale documented.',
+        note: 'Live-tested end to end. Area must be 3.69-16.78MP — this is the model that produced invalidPixels ' +
+          'at 1024x1024. No steps/CFGScale documented.',
         dimensions: {
           kind: 'range',
           minEdge: 256,
@@ -224,6 +283,18 @@ export const MODELS: EditModel[] = [
         supportsNegativePrompt: false,
         maxReferenceImages: 10,
       },
+      atlas: {
+        slug: 'bytedance/seedream-v4.5/edit',
+        verified: true,
+        note: 'Live-tested end to end. Confirmed via atlascloud.ai/models/bytedance/seedream-v4.5/edit. ' +
+          'Field: images (array, max 10). $0.04/image.',
+        dimensions: { kind: 'provider-default' },
+        supportsSteps: false,
+        supportsCfg: false,
+        supportsNegativePrompt: false,
+        maxReferenceImages: 10,
+        imageInput: { kind: 'array', field: 'images', max: 10 },
+      },
     },
   },
   {
@@ -235,7 +306,7 @@ export const MODELS: EditModel[] = [
       runware: {
         slug: 'alibaba:wan@2.7-image',
         verified: true,
-        note: 'Confirmed in Runware model docs. 768-2048 per side in 16px increments.',
+        note: 'Live-tested end to end. 768-2048 per side in 16px increments.',
         dimensions: {
           kind: 'range',
           minEdge: 768,
@@ -267,6 +338,18 @@ export const MODELS: EditModel[] = [
         supportsNegativePrompt: false,
         maxReferenceImages: 1,
       },
+      atlas: {
+        slug: 'alibaba/wan-2.7/image-edit',
+        verified: true,
+        note: 'Live-tested end to end. Confirmed via atlascloud.ai/models/alibaba/wan-2.7/image-edit. ' +
+          'Field: images (array, min 1 max 9). size is "1K" or "2K" (default 2K) rather than explicit width/height.',
+        dimensions: { kind: 'provider-default' },
+        supportsSteps: false,
+        supportsCfg: false,
+        supportsNegativePrompt: false,
+        maxReferenceImages: 9,
+        imageInput: { kind: 'array', field: 'images', max: 9 },
+      },
     },
   },
   {
@@ -278,7 +361,7 @@ export const MODELS: EditModel[] = [
       runware: {
         slug: 'xai:grok-imagine@image',
         verified: true,
-        note: 'Confirmed in Runware model docs. Uses a resolution preset; width/height cannot be sent alongside it. No steps/CFGScale.',
+        note: 'Live-tested end to end. Uses a resolution preset; width/height cannot be sent alongside it. No steps/CFGScale.',
         dimensions: { kind: 'resolution-preset', preset: '1K' },
         supportsSteps: false,
         supportsCfg: false,
@@ -304,6 +387,19 @@ export const MODELS: EditModel[] = [
         supportsCfg: false,
         supportsNegativePrompt: false,
         maxReferenceImages: 3,
+      },
+      atlas: {
+        slug: 'xai/grok-imagine-image-quality/edit',
+        verified: true,
+        note: 'Live-tested end to end. The image field name (single "image", matching Kontext) was an inferred ' +
+          'guess going in — no generateImage docs page for this specific slug was found — and the live call ' +
+          'confirmed it correct.',
+        dimensions: { kind: 'provider-default' },
+        supportsSteps: false,
+        supportsCfg: false,
+        supportsNegativePrompt: false,
+        maxReferenceImages: 7,
+        imageInput: { kind: 'single', field: 'image' },
       },
     },
   },

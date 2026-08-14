@@ -211,6 +211,19 @@ export async function uploadLoraToRunware(hfUrl: string, apiKey: string): Promis
       taskUUID: uuidv4(),
       deliveryMethod: 'sync',
       category: 'lora',
+      // 'flux1d' is correct — confirmed against Runware's own error response,
+      // which lists every valid architecture value (GET the full enum by sending
+      // an invalid one; it echoes the complete allowedValues list). There is no
+      // separate "kontext" tag: the FLUX family only has 'flux1s' and 'flux1d'.
+      // A LoRA uploaded here still gets rejected at INFERENCE time when attached
+      // to runware:106@1 (Kontext Dev) with 'unsupportedLoraModel' — that is a
+      // real Runware platform limitation (Kontext's extra reference-image
+      // conditioning makes it structurally different from plain FLUX.1-dev, even
+      // though BFL's own position — cited in this project's HANDOFF.md — is that
+      // FLUX.1-dev LoRAs load on Kontext elsewhere, e.g. ComfyUI/diffusers, with a
+      // quality tradeoff). Runware enforces stricter compatibility than that.
+      // Confirmed live: no upload-metadata change fixes it, so the retry logic in
+      // runware.ts's edit() does not attempt one for this specific error anymore.
       architecture: 'flux1d',
       format: 'safetensors',
       air: airId,
