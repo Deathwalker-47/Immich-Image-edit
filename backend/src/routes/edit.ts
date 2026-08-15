@@ -110,4 +110,95 @@ router.get('/loras', (_req: Request, res: Response) => {
   }
 });
 
+/**
+ * Hosts whose result images may be proxied by /download.
+ *
+ * This is an allowlist, not a filter, and it must stay that way. The endpoint
+ * fetches a caller-supplied URL from inside the container, which sits on the
+ * immich_default docker network — an unrestricted version would happily fetch
+ * http://immich-server:2283, the Docker/cloud metadata endpoint, or anything
+ * else reachable from here and hand the body back to the browser. Matching is
+ * on exact host or a dot-suffix, so "evil-fal.media" cannot pass as "fal.media".
+ */
+const DOWNLOADABLE_HOSTS = [
+  'im.runware.ai',              // Runware
+  'atlas-media.oss-us-west-1.aliyuncs.com', // Atlas
+  'replicate.delivery',         // Replicate
+  'fal.media',                  // Fal
+];
+
+function isDownloadableHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return DOWNLOADABLE_HOSTS.some((allowed) => h === allowed || h.endsWith(`.${allowed}`));
+}
+
+/**
+ * GET /api/edit/download?url=...&filename=... — stream a provider result back
+ * as an attachment.
+ *
+ * The browser cannot download these directly. Provider result URLs are
+ * cross-origin and send no Access-Control-Allow-Origin header — confirmed
+ * against Atlas's Alibaba OSS bucket, which returns the image fine to curl but
+ * has no CORS header at all — so the frontend's fetch() was being blocked and
+ * surfaced as a bare "Download failed". Fetching server-side sidesteps CORS
+ * entirely, and returning Content-Disposition: attachment means the response is
+ * a real file download rather than a blob: URL, which also gives an Android
+ * WebView something it can actually handle.
+ */
+router.get('/download', async (req: Request, res: Response) => {
+  const rawUrl = String(req.query.url || '');
+  if (!rawUrl) {
+    res.status(400).json({ error: 'url query parameter is required' });
+    return;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    res.status(400).json({ error: 'url is not a valid absolute URL' });
+    return;
+  }
+
+  if (parsed.protocol !== 'https:') {
+    res.status(400).json({ error: 'Only https URLs can be downloaded' });
+    return;
+  }
+  if (!isDownloadableHost(parsed.hostname)) {
+    res.status(403).json({
+      error: `Refusing to proxy ${parsed.hostname}. Only provider result hosts can be downloaded.`,
+    });
+    return;
+  }
+
+  try {
+    const upstream = await fetch(parsed.toString());
+    if (!upstream.ok || !upstream.body) {
+      res.status(upstream.status || 502).json({
+        error: `Provider returned ${upstream.status} for the result image`,
+      });
+      return;
+    }
+
+    const contentType = upstream.headers.get('content-type') || 'image/jpeg';
+    // Strip anything path-like or quote-like out of the caller's filename — it
+    // goes into a response header, so it is not a place to trust input.
+    const safeName =
+      String(req.query.filename || '')
+        .replace(/[^A-Za-z0-9._-]/g, '')
+        .slice(0, 100) || `ai-edit-${Date.now()}.jpg`;
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
+    const len = upstream.headers.get('content-length');
+    if (len) res.setHeader('Content-Length', len);
+
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    res.send(buffer);
+  } catch (err: any) {
+    console.error('[Download] proxy error:', err.message);
+    res.status(502).json({ error: `Could not fetch the result image: ${err.message}` });
+  }
+});
+
 export { router as editRouter };

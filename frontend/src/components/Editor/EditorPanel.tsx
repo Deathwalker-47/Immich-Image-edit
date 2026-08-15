@@ -95,22 +95,36 @@ export function EditorPanel() {
     }
   }, [currentImage, activeAsset, state, dispatch, addToast]);
 
-  const handleDownload = useCallback(async () => {
+  const handleDownload = useCallback(() => {
     if (!currentImage) return;
-    try {
-      const res = await fetch(currentImage.imageUrl);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `ai-edit-${Date.now()}.jpg`;
-      a.click();
-      URL.revokeObjectURL(url);
-      addToast({ type: 'success', title: 'Downloaded!' });
-    } catch (err: any) {
-      addToast({ type: 'error', title: 'Download failed', message: err.message });
-    }
-  }, [currentImage, addToast]);
+    const src = currentImage.imageUrl;
+    const filename = `ai-edit-${Date.now()}.jpg`;
+
+    // Provider result URLs (Atlas, Runware, Replicate, Fal) are cross-origin and
+    // send no Access-Control-Allow-Origin header, so fetching them here to build
+    // a blob was always blocked by CORS — that was the "Download failed" on Atlas
+    // results. Anything not already same-origin goes through the backend proxy,
+    // which refetches it server-side and returns it as an attachment.
+    //
+    // Navigating to a URL that responds with Content-Disposition: attachment also
+    // behaves far better than a blob: link inside a mobile WebView, which is how
+    // this app is actually used.
+    const isSameOrigin = src.startsWith('/') || src.startsWith(window.location.origin);
+    const href = isSameOrigin
+      ? src
+      : `/api/edit/download?url=${encodeURIComponent(src)}&filename=${encodeURIComponent(filename)}`;
+
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = filename;
+    // Give the WebView a normal navigation to fall back on if it ignores
+    // `download`; a same-tab navigation to an attachment still triggers its
+    // download handling, where a blob: URL simply does nothing.
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }, [currentImage]);
 
   if (!activeAsset) return null;
 
