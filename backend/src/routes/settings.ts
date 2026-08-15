@@ -25,7 +25,18 @@ const PROVIDER_META: { id: ProviderId; name: string; envKey: string }[] = [
 ];
 
 export const defaultSettings: AppSettings = {
-  immichUrl: process.env.IMMICH_URL || '',
+  // IMMICH_URL is not one of the variables docker-compose actually passes — the
+  // deployed env defines IMMICH_PUBLIC_URL (browser-facing) and
+  // IMMICH_INTERNAL_URL (container-to-container). Reading only IMMICH_URL left
+  // this blank in the Settings dialog, which reads as unconfigured even though
+  // every Immich call was working, since the backend routes them via
+  // IMMICH_INTERNAL_URL and the frontend only ever calls its own /api proxy.
+  // Prefer the public URL — this field is labelled "for browser access".
+  immichUrl:
+    process.env.IMMICH_URL ||
+    process.env.IMMICH_PUBLIC_URL ||
+    process.env.IMMICH_INTERNAL_URL ||
+    '',
   immichApiKey: process.env.IMMICH_API_KEY || '',
   defaultProvider: DEFAULT_PROVIDER,
   defaultStrength: 0.75,

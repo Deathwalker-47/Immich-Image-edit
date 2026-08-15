@@ -1,15 +1,27 @@
 # Agent Handoff — Immich AI Editor
 
-**Last updated:** 2026-08-14 (late session) · Supersedes all earlier versions of this file.
+**Last updated:** 2026-08-15 · Supersedes all earlier versions of this file.
 **Read §2 before touching sizing or model slugs** — it corrects a diagnosis in `HANDOFF.md` that would break working code if followed.
 
 ---
 
-## 1. State: `main` @ `045f60f`, clean, pushed
+## 1. State: `main` @ `f57b469` — **deployed and live-verified**
 
-Backend and frontend both typecheck and build clean. **Not yet deployed.**
+Backend and frontend typecheck and build clean. **Deployed to Hetzner and verified end-to-end on 2026-08-15.**
 
-The provider/editing layer is proven — 16 real edits against live APIs. The **Immich layer is not** — no Immich instance was ever reachable from the environment this was built in, so every Immich code path is doc-verified only. That is the single biggest risk area and the first thing to check on deploy.
+The provider/editing layer was already proven (16 real edits). The **Immich layer is now proven too** — every path was exercised against the real instance:
+
+| Immich path | Result |
+|---|---|
+| `POST /search/metadata` (timeline) | ✅ 200 — the previously unverified fix, now confirmed |
+| `GET /albums` | ✅ 200, 50+ albums with real counts |
+| `GET /albums/:id` assets | ✅ **was broken — fixed in `f57b469`**, see §2 |
+| Thumbnails (`size=thumbnail` / `preview`) | ✅ 12/12 → 200 `image/webp` |
+| Original | ✅ 200 `image/png`, 1536×2048 |
+| Upload (save-back) | ✅ asset created, `AI Edits` album ensured + attached |
+| Live edit through deployed backend | ✅ 200 in 18.1s via Runware Kontext Dev |
+
+Verification asset `a9e7f1b3-7840-44e2-89f0-110720febb3f` (`claude-verify-saveback.png`, a 1×1 test pixel) was uploaded to prove save-back and is still in the `AI Edits` album — safe to delete.
 
 ### Works, live-confirmed
 
@@ -34,7 +46,11 @@ The provider/editing layer is proven — 16 real edits against live APIs. The **
 
 **§6.1's `invalidPixels` diagnosis.** It says Runware requires 3.69–16.78MP for *every* model. That band belongs to **Seedream 4.5 alone**. Kontext accepts 9 fixed pairs topping out near 1.05MP — so `1024x1024` is a *valid* Kontext size, and Kontext was never the model throwing that error. Applying Seedream's floor globally would break Kontext. Constraints are per-model in `sizing.ts`; each model has its own `DimensionRule`. Never consolidate them into a shared constant.
 
-**§6.5's "intermittent" timeline failure.** It wasn't intermittent — `routes/immich.ts` called `GET /assets?page=`, the `getAllAssets` endpoint removed in immich-app/immich#9715, which 404s every time. Album browsing used a different, still-valid endpoint and kept working, which made it *look* intermittent. Now uses `POST /search/metadata`. **This fix is unverified against a live Immich.**
+**§6.5's "intermittent" timeline failure.** It wasn't intermittent — `routes/immich.ts` called `GET /assets?page=`, the `getAllAssets` endpoint removed in immich-app/immich#9715, which 404s every time. Now uses `POST /search/metadata`. **Confirmed on 2026-08-15:** the old endpoint returns 404 against the live instance on every call, and `search/metadata` returns 200. Fix verified.
+
+**The album half of that same diagnosis was also wrong.** §6.5 assumed album browsing "kept working". It did not. `GET /albums/:id` no longer returns an `assets` array on current Immich — verified live with `?withoutAssets=false`, `?withoutAssets=true`, and no parameter: all three return `assetCount` but no `assets` key. The frontend defaults a missing key to `[]`, so albums opened to an empty grid *without* erroring — which is why it looked like the timeline was the only casualty. Fixed in `f57b469`: album assets now come from `POST /search/metadata` filtered by `albumIds`, paged via `nextPage` (Immich caps a page at 1000), videos filtered out. Verified live: a 1244-asset album returns its 655 images; an all-video album correctly returns 0.
+
+**Both failures share one root cause** — Immich removed/changed asset-listing endpoints, and this codebase was written against the older shapes. If another Immich read path misbehaves, suspect the endpoint before the UI.
 
 ---
 
@@ -63,11 +79,36 @@ The provider/editing layer is proven — 16 real edits against live APIs. The **
 
 ## 5. What's left
 
-1. **Deploy to Hetzner** (`/opt/gemini`, live at `gedit.midnighttavern.online`) — never done from the previous environment; SSH/port-22 was blocked there. See §6.
-2. **Verify the Immich layer against the real instance** — gallery load, thumbnails, and save-back-to-Immich. Highest-risk untested area.
-3. **Fal** — add credit, then verify its five models.
+1. ~~Deploy to Hetzner~~ — **done 2026-08-15.**
+2. ~~Verify the Immich layer~~ — **done 2026-08-15**, and it surfaced the album bug above.
+3. **Fal** — add credit, then verify its five models. Still the only unverified provider.
 4. **Seedream 5.0 Pro** — retry; may just have been provider load.
-5. **Android app** — a fork of Immich mobile embedding this editor in an `InAppWebView`. Untouched all session. Web was the stated priority.
+5. **Android app** — **already exists and works; it was never missing.** See §8.
+
+---
+
+## 8. The Android app (this was the actual delivery surface)
+
+The editor is used *inside the Immich mobile app*, not as a standalone site. That integration already exists:
+
+- **Fork:** `C:\Users\anuji\Documents\antigravity\Immich-Image-edit\immich-mobile-fork` — a full Immich monorepo clone at upstream `daabab8`, with the customisation left uncommitted.
+- **The whole integration is two files:**
+  - `mobile/lib/presentation/widgets/action_buttons/ai_edit_action_button.widget.dart` (new) — a "Magic Edit" button that opens `https://gedit.midnighttavern.online/?assetId=<remoteId>` via `launchUrl(..., LaunchMode.inAppWebView)`.
+  - `mobile/lib/presentation/widgets/asset_viewer/bottom_bar.widget.dart` — one line: `if (asset.isImage) const AiEditActionButton(),`.
+- **The editor's `?assetId=` deep-link** (`App.tsx`) is what makes this work — it skips the gallery and opens straight into the editor for that asset. Don't remove it; the mobile app depends on it.
+- **Built APKs:** `Desktop\Immich-AI-Editor-v3.apk` is current (byte-identical to `antigravity\...\Immich-Mobile-App.apk`; `v2` is older). All three already point at `gedit.midnighttavern.online`.
+
+**Why it seemed broken:** nothing was wrong with the APK. It opens a WebView onto the deployed editor, and that editor was running 5-week-old code with a dead timeline endpoint and empty albums. The fixes were entirely server-side — **the existing v3 APK needs no rebuild.** Only re-build the APK if `aiEditorHost` in the button file has to change; the URL is hardcoded there, not configurable at runtime.
+
+**Toolchain (local machine, verified):** Flutter 3.44.5 stable, Android SDK 35, JDK 17, `flutter doctor` clean. `cd immich-mobile-fork/mobile && flutter build apk --release`.
+
+---
+
+## 9. Removed: the abandoned Grok deployment
+
+`/opt/grok/immich-ai-editor` was a **second, unrelated** Python/FastAPI editor from an earlier attempt, with its own Tampermonkey userscript. It was dead — no container, no image, no systemd unit — and its userscript still had the placeholder `backendUrl: 'http://CHANGE_ME:8088'` pointing at a sidecar that no longer runs. It was removed on 2026-08-15 at the owner's instruction, along with an inert `xedit.midnighttavern.online` nginx vhost that referenced it.
+
+Archived first, restorable: `/root/backups/grok-immich-ai-editor-removed-*.tar.gz`. **`/opt/gemini` is the only real deployment** — don't resurrect the other one.
 
 ---
 
@@ -82,7 +123,9 @@ docker compose logs -f immich-ai-backend
 - **Confirm `[LoRA] Catalogue loaded: 81 LoRAs` in the logs.** If it says `EMPTY CATALOGUE`, the JSON mounts didn't take.
 - **Set `defaultProvider` to `runware` or `atlas`, not `fal`** — a stale `fal` default means every edit fails on arrival (no balance).
 - No new env keys needed; all recently-added models are Runware.
-- `/opt/gemini` is **not a git repo** historically (it was scp-deployed). Confirm before assuming `git pull` works there.
+- **`/opt/gemini` IS a git repo** — tracking `origin/main`, so `git pull` works. (An earlier note here guessed otherwise.) One caveat, already resolved: it originally held a single orphan snapshot commit `fe88042` with *no common ancestor* with `origin/main`, so `git pull` failed with "not possible to fast-forward". It was re-pointed with `git checkout -B main origin/main` after a backup; `.env` is untracked and survived. Future pulls are ordinary fast-forwards.
+- `.env` on the server is the source of truth for keys and is **not** in git. Don't overwrite it.
+- The `[LoRA] Catalogue loaded: 81 LoRAs` line is **lazy** — it appears on the first `/api/edit/loras` request, not at boot. Its absence from startup logs is not a failure; hit the endpoint before concluding anything.
 - Frontend is a Vite build baked into the nginx image — **frontend changes require `docker compose build`**, not just a restart. Forgetting this and then fighting WebView cache has burned time before.
 - Three deployment blockers were fixed in `045f60f` (empty LoRA catalogue in Docker, missing `backend/data` volume, dead Immich endpoint) — all three worked fine locally and only broke once containerised, so re-test *in the container*, not just locally.
 
