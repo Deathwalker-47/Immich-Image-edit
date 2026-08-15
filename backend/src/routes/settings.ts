@@ -129,14 +129,26 @@ router.get('/providers', (req: Request, res: Response) => {
       current = { ...current, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8')) };
     }
 
-    const result = PROVIDER_META.map(p => {
+    // Providers with an empty model list are hidden rather than shown as a
+    // selectable provider you can't actually run anything on. Replicate is in
+    // that state deliberately — every model it offered averaged over 150s and
+    // was removed (see models.ts). Its credentials and provider code remain, so
+    // re-adding variants there brings it straight back into this list.
+    const result = PROVIDER_META.filter(p => providerModelList(p.id).length > 0).map(p => {
       const pKey = p.id as keyof typeof current.providers;
+      const models = providerModelList(p.id);
+      const saved = current.providers[pKey]?.model;
       return {
         id: p.id,
         name: p.name,
         configured: !!current.providers[pKey]?.apiKey,
-        model: current.providers[pKey]?.model || DEFAULT_MODEL_ID,
-        models: providerModelList(p.id),
+        // Never hand back a model this provider can no longer run — a setting
+        // saved before a variant was removed would otherwise keep pointing at
+        // it and fail on every edit.
+        model: models.some(m => m.id === saved)
+          ? saved
+          : (models.some(m => m.id === DEFAULT_MODEL_ID) ? DEFAULT_MODEL_ID : models[0].id),
+        models,
       };
     });
 

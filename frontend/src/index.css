@@ -963,6 +963,42 @@ html, body {
   min-width: 190px;
 }
 
+/* Speed/price detail under the model picker in Settings. */
+.model-meta {
+  margin-top: var(--space-2);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-meta-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.model-meta-lora {
+  color: var(--text-accent);
+}
+
+/* Reserved for caveats — an unmeasured timing, an unusually long wait. */
+.model-meta-warn {
+  color: var(--warning, #d99a2b);
+}
+
+/* The editor's provider badge carries the same estimate, so the wait and price
+   are visible at the moment of clicking Apply rather than only in Settings. */
+.provider-badge-est {
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
 .provider-badge {
   display: flex;
   align-items: center;

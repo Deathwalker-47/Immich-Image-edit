@@ -82,6 +82,27 @@ export interface ModelVariant {
   /** Atlas only — see ImageInputMode. */
   imageInput?: ImageInputMode;
   /**
+   * Measured mean wall-clock seconds for one full edit through this app,
+   * benchmarked 2026-08-15 (2 runs each, same 1536x2048 source photo, backend
+   * called directly so no proxy timeout could truncate it). This is end-to-end
+   * request time — provider queue included — not the provider's own "predict"
+   * metric, because queue time is what the user actually waits through. Null
+   * means not measurable at benchmark time (see `speedNote`).
+   *
+   * Kept as measured data rather than a guess: any model averaging over 150s
+   * is removed, so these numbers are the evidence for what stays.
+   */
+  avgSeconds?: number | null;
+  /** Why avgSeconds is null, or a caveat on the number. */
+  speedNote?: string;
+  /**
+   * Approximate USD per image, from the provider's own published pricing (not
+   * inferred). Null where the provider publishes no flat per-image figure.
+   */
+  costUsd?: number | null;
+  /** Human-readable pricing detail — tiers, resolution caveats, extras. */
+  costNote?: string;
+  /**
    * Runware only. Some models take extra settings nested under
    * `providerSettings.<key>` (e.g. `providerSettings.bfl.safetyTolerance`).
    * Static values only — merged into the task as-is, not user-configurable per
@@ -151,6 +172,9 @@ export const MODELS: EditModel[] = [
         supportsCfg: true,
         supportsNegativePrompt: true,
         maxReferenceImages: 2,
+        avgSeconds: 26.8,
+        costUsd: null,
+        costNote: 'Runware publishes no flat per-image price for Kontext dev — it is billed by compute/steps. Its own model docs page has no pricing section, unlike the pro/max pages.',
       },
       fal: {
         slug: 'fal-ai/flux-kontext/dev',
@@ -163,20 +187,14 @@ export const MODELS: EditModel[] = [
         supportsCfg: true,
         supportsNegativePrompt: false,
         maxReferenceImages: 1,
+        avgSeconds: null,
+        speedNote: 'Not measured — the Fal account is locked with an exhausted balance, so no timing exists for either Fal model. Top up and re-benchmark before trusting Fal for anything time-sensitive.',
+        costUsd: null,
+        costNote: 'Not recorded — account locked, pricing not confirmed live.',
       },
-      replicate: {
-        slug: 'black-forest-labs/flux-kontext-dev',
-        verified: true,
-        note: 'Live end-to-end test passed. Schema fetched via the authenticated GET /v1/models/{owner}/{name} ' +
-          '(unauthenticated requests 404 rather than exposing it). Fields: input_image, prompt, guidance ' +
-          '(not guidance_scale), disable_safety_checker (not safety_tolerance), aspect_ratio ' +
-          '(default match_input_image — no width/height needed), num_inference_steps.',
-        dimensions: { kind: 'provider-default' },
-        supportsSteps: true,
-        supportsCfg: true,
-        supportsNegativePrompt: false,
-        maxReferenceImages: 1,
-      },
+      // replicate REMOVED 2026-08-15 (latency). Benchmarked at 208.0s on the one
+      // run that completed; the second exceeded 300s without returning. Far over
+      // the 150s bar. Atlas runs the identical model in ~23.9s, so nothing is lost.
       atlas: {
         slug: 'black-forest-labs/flux-kontext-dev',
         verified: true,
@@ -189,6 +207,9 @@ export const MODELS: EditModel[] = [
         supportsNegativePrompt: false,
         maxReferenceImages: 1,
         imageInput: { kind: 'single', field: 'image' },
+        avgSeconds: 23.9,
+        costUsd: 0.025,
+        costNote: '$0.025 per image.',
       },
     },
   },
@@ -198,28 +219,12 @@ export const MODELS: EditModel[] = [
     description: 'Kontext Dev with LoRA adapters. The only model the LoRA picker applies to.',
     loraCapable: true,
     providers: {
-      runware: {
-        // Runware has no separate LoRA endpoint — it is the base model plus a lora array.
-        slug: 'runware:106@1',
-        verified: true,
-        note: 'KNOWN PLATFORM LIMITATION, confirmed live: Runware rejects every LoRA tested against this base ' +
-          'model with unsupportedLoraModel, even a freshly-uploaded, correctly-tagged (architecture: flux1d — ' +
-          'the only FLUX option in Runware\'s own architecture enum, confirmed by deliberately sending an ' +
-          'invalid value and reading back the full allowedValues list) LoRA. This is not a stale-cache problem ' +
-          '(self-heal for the 7 hand-made bad AIRs still applies and is unrelated) and not fixable from the ' +
-          'client side — Kontext\'s extra reference-image conditioning appears to make Runware treat it as ' +
-          'incompatible with flux1d LoRAs at inference time, regardless of what BFL says elsewhere about ' +
-          'FLUX.1-dev LoRAs loading on Kontext with a quality tradeoff (true on e.g. ComfyUI/diffusers, not ' +
-          'true on Runware\'s platform). edit() throws a clear error rather than silently dropping the LoRA and ' +
-          'returning an unmodified-by-LoRA edit as if it had succeeded — that silent-drop was the initial, ' +
-          'more dangerous failure mode before this was understood. Replicate and Atlas both apply LoRAs to this ' +
-          'same model family successfully; prefer them for LoRA edits until/unless Runware changes this.',
-        dimensions: KONTEXT_DIMENSIONS,
-        supportsSteps: true,
-        supportsCfg: true,
-        supportsNegativePrompt: true,
-        maxReferenceImages: 2,
-      },
+      // runware REMOVED 2026-08-15. Not a latency call — this variant failed 100%
+      // of the time in 2.3s with `unsupportedLoraModel`. Runware cannot apply LoRAs
+      // to Kontext (platform limitation, exhaustively confirmed; see the Removed
+      // variants note at the bottom of this file). Offering it only produced a
+      // guaranteed error, so it is no longer selectable. providers/runware.ts still
+      // throws a clear error if a stale saved setting reaches it.
       fal: {
         slug: 'fal-ai/flux-kontext-lora',
         verified: true,
@@ -230,20 +235,15 @@ export const MODELS: EditModel[] = [
         supportsCfg: true,
         supportsNegativePrompt: false,
         maxReferenceImages: 1,
+        avgSeconds: null,
+        speedNote: 'Not measured — the Fal account is locked with an exhausted balance, so no timing exists for either Fal model. Top up and re-benchmark before trusting Fal for anything time-sensitive.',
+        costUsd: null,
+        costNote: 'Not recorded — account locked, pricing not confirmed live.',
       },
-      replicate: {
-        slug: 'black-forest-labs/flux-kontext-dev-lora',
-        verified: true,
-        note: 'Schema fetched via the authenticated model API. Fields: input_image, prompt, lora_weights, ' +
-          'lora_strength (NOT hf_lora/lora_scale — that was the sibling flux-dev-lora model\'s convention, ' +
-          'different from this one). Confirmed live: the wrong field names reached the model with no LoRA ' +
-          'loaded and crashed inside its own weight-quantization code rather than failing cleanly.',
-        dimensions: { kind: 'provider-default' },
-        supportsSteps: true,
-        supportsCfg: true,
-        supportsNegativePrompt: false,
-        maxReferenceImages: 1,
-      },
+      // replicate REMOVED 2026-08-15 (latency). Benchmarked at 240.2s completing,
+      // with another run exceeding 300s. Replicate's queue wait alone measured
+      // 128-226s before the model even started, which is a platform characteristic
+      // and not tunable from here. Atlas runs this same LoRA model in ~27.4s.
       atlas: {
         slug: 'black-forest-labs/flux-kontext-dev-lora',
         verified: true,
@@ -257,6 +257,9 @@ export const MODELS: EditModel[] = [
         supportsNegativePrompt: false,
         maxReferenceImages: 1,
         imageInput: { kind: 'single', field: 'image' },
+        avgSeconds: 27.4,
+        costUsd: 0.03,
+        costNote: '$0.03 per image.',
       },
     },
   },
@@ -283,6 +286,9 @@ export const MODELS: EditModel[] = [
         supportsCfg: false,
         supportsNegativePrompt: false,
         maxReferenceImages: 14,
+        avgSeconds: 33.9,
+        costUsd: 0.04,
+        costNote: '$0.04 per image at 2K and 4K.',
       },
       // fal + replicate REMOVED 2026-08-15 — see the "Removed variants" note at
       // the bottom of this file. Both endpoints exist but take an image field
@@ -300,6 +306,9 @@ export const MODELS: EditModel[] = [
         supportsNegativePrompt: false,
         maxReferenceImages: 10,
         imageInput: { kind: 'array', field: 'images', max: 10 },
+        avgSeconds: 23.2,
+        costUsd: 0.04,
+        costNote: '$0.04 per image.',
       },
     },
   },
@@ -323,6 +332,9 @@ export const MODELS: EditModel[] = [
         supportsCfg: false,
         supportsNegativePrompt: false,
         maxReferenceImages: 1,
+        avgSeconds: 15.5,
+        costUsd: 0.03,
+        costNote: '$0.03 per image at 1024x1024.',
       },
       // fal + replicate REMOVED 2026-08-15 — see the "Removed variants" note at
       // the bottom of this file. fal has no Wan 2.7 image-to-image endpoint at
@@ -339,6 +351,9 @@ export const MODELS: EditModel[] = [
         supportsNegativePrompt: false,
         maxReferenceImages: 9,
         imageInput: { kind: 'array', field: 'images', max: 9 },
+        avgSeconds: 23.0,
+        costUsd: 0.03,
+        costNote: '$0.03 per image.',
       },
     },
   },
@@ -357,6 +372,9 @@ export const MODELS: EditModel[] = [
         supportsCfg: false,
         supportsNegativePrompt: false,
         maxReferenceImages: 3,
+        avgSeconds: 16.0,
+        costUsd: 0.02,
+        costNote: '$0.02 per image at 1024x1024, plus $0.002 per input image when editing.',
       },
       // fal + replicate REMOVED 2026-08-15 — see the "Removed variants" note at
       // the bottom of this file. fal wants `image_urls` (array), Replicate wants
@@ -373,6 +391,9 @@ export const MODELS: EditModel[] = [
         supportsNegativePrompt: false,
         maxReferenceImages: 7,
         imageInput: { kind: 'single', field: 'image' },
+        avgSeconds: 15.1,
+        costUsd: 0.05,
+        costNote: '$0.05 per image at 1K, $0.07 at 2K.',
       },
     },
   },
@@ -410,6 +431,9 @@ export const MODELS: EditModel[] = [
         supportsCfg: false,
         supportsNegativePrompt: false,
         maxReferenceImages: 2,
+        avgSeconds: 13.9,
+        costUsd: 0.04,
+        costNote: '$0.04 per image at 1024x1024.',
         runwareProviderSettingsKey: 'bfl',
         runwareProviderSettings: { safetyTolerance: 6 },
       },
@@ -433,6 +457,9 @@ export const MODELS: EditModel[] = [
         supportsCfg: false,
         supportsNegativePrompt: false,
         maxReferenceImages: 2,
+        avgSeconds: 15.0,
+        costUsd: 0.08,
+        costNote: '$0.08 per image at 1024x1024.',
         runwareProviderSettingsKey: 'bfl',
         runwareProviderSettings: { safetyTolerance: 6 },
       },
@@ -471,6 +498,10 @@ export const MODELS: EditModel[] = [
         supportsCfg: false,
         supportsNegativePrompt: false,
         maxReferenceImages: 10,
+        avgSeconds: 113.4,
+        speedNote: 'By far the slowest surviving model (106.3s and 120.4s measured). Under the 150s bar so it stays, but expect a long wait. Two earlier attempts on a different day failed outright with a Runware-side 504 at ~122s.',
+        costUsd: 0.048,
+        costNote: '$0.04815 per image up to 2.36MP (1.5K), $0.0963 above that (2K). Extra reference images $0.00321 each; the first is free.',
       },
     },
   },
@@ -497,6 +528,10 @@ export const MODELS: EditModel[] = [
         supportsCfg: false,
         supportsNegativePrompt: false,
         maxReferenceImages: 9,
+        avgSeconds: 19.8,
+        speedNote: 'Single sample — the second benchmark run hit a Runware balance error, not a model failure.',
+        costUsd: 0.075,
+        costNote: '$0.075 per image at 1024x1024, 30 steps.',
         runwareExtraFields: { safety: { checkContent: false } },
       },
     },
@@ -527,6 +562,10 @@ export const MODELS: EditModel[] = [
         supportsCfg: false,
         supportsNegativePrompt: false,
         maxReferenceImages: 3,
+        avgSeconds: null,
+        speedNote: 'Not measured — the Runware account ran out of credits before this model was reached. Every other Runware model came in between 13.9s and 33.9s except Seedream 5.0 Pro, so this is expected to be fast, but that is an expectation and not a measurement.',
+        costUsd: 0.075,
+        costNote: '$0.075 per image at 1024x1024, 30 steps.',
       },
     },
   },
@@ -565,9 +604,34 @@ export const MODELS: EditModel[] = [
  * extend that to Replicate/Fal rather than hardcoding a second convention — and
  * then confirming it live with a real edit before setting `verified: true`.
  *
- * What remains is deliberately narrow and all live-confirmed: Runware carries
- * the full 10-model catalogue, Atlas 5, and Fal and Replicate are Kontext Dev
- * and Kontext Dev LoRA only.
+ * ---------------------------------------------------------------------------
+ * SECOND PASS, same day — removed on measured LATENCY, not on correctness.
+ *
+ * Every surviving combination was benchmarked end to end (2 runs each, one
+ * 1536x2048 source photo, backend called directly so no proxy could truncate
+ * the timing). The bar: drop anything averaging over 150s.
+ *
+ *   Replicate flux-kontext-dev       208.0s completing; a second run passed 300s
+ *   Replicate flux-kontext-dev-lora  240.2s completing; a second run passed 300s
+ *
+ * Both are gone, which leaves Replicate with no models at all — deliberate.
+ * The cause is Replicate's queue, not the models: prediction metrics showed
+ * 128-226s of QUEUE WAIT before inference even began, against predict times of
+ * 4.6-237.6s. Nothing in this codebase can shorten that. No capability is lost,
+ * because Atlas serves both of those exact models at ~23.9s and ~27.4s.
+ * providers/replicate.ts is intentionally left in place, so restoring Replicate
+ * is just re-adding variants here if its queue behaviour ever improves.
+ *
+ *   Runware flux-kontext-dev-lora    removed, but for correctness not speed: it
+ *   failed 100% of runs in ~2.3s with `unsupportedLoraModel`. See that model's
+ *   inline note. It was a guaranteed-error menu entry.
+ *
+ * Kept despite being slow: Runware Seedream 5.0 Pro at 113.4s (106.3 / 120.4).
+ * Under the bar, and it is a flagship-quality option, so it stays — its
+ * avgSeconds is surfaced in the UI so the wait is visible before committing.
+ *
+ * Resulting catalogue: Runware 9, Atlas 5, Fal 2 (unmeasured, account locked),
+ * Replicate 0.
  */
 
 export const DEFAULT_PROVIDER: ProviderId = 'runware';
@@ -635,11 +699,26 @@ export function resolveModel(
  * only the models that provider can actually run.
  */
 export function providerModelList(provider: ProviderId) {
-  return MODELS.filter((m) => m.providers[provider]).map((m) => ({
-    id: m.id,
-    name: m.name,
-    description: m.description,
-    loraCapable: m.loraCapable,
-    verified: !!m.providers[provider]?.verified,
-  }));
+  return MODELS.filter((m) => m.providers[provider]).map((m) => {
+    const v = m.providers[provider]!;
+    return {
+      id: m.id,
+      name: m.name,
+      description: m.description,
+      loraCapable: m.loraCapable,
+      verified: !!v.verified,
+      // Surfaced in the model picker so the speed/price tradeoff is visible at
+      // the point of choosing, rather than discovered by waiting.
+      avgSeconds: v.avgSeconds ?? null,
+      speedNote: v.speedNote ?? null,
+      costUsd: v.costUsd ?? null,
+      costNote: v.costNote ?? null,
+    };
+  });
+}
+
+/** Providers that actually have at least one runnable model. */
+export function providersWithModels(): ProviderId[] {
+  const all: ProviderId[] = ['runware', 'fal', 'replicate', 'atlas'];
+  return all.filter((p) => MODELS.some((m) => m.providers[p]));
 }

@@ -89,6 +89,33 @@ export interface ModelInfo {
   loraCapable?: boolean;
   /** False when the provider slug hasn't been confirmed against its live catalogue. */
   verified?: boolean;
+  /** Measured mean seconds for one edit. Null when it couldn't be benchmarked. */
+  avgSeconds?: number | null;
+  /** Caveat on avgSeconds, or why it's missing. */
+  speedNote?: string | null;
+  /** Provider's published USD per image. Null when none is published. */
+  costUsd?: number | null;
+  /** Pricing detail — tiers, resolution caveats, extras. */
+  costNote?: string | null;
+}
+
+/** "~27s" / "~1m 53s" / "—" when unmeasured. */
+export function formatDuration(seconds?: number | null): string {
+  if (seconds == null) return '—';
+  if (seconds < 60) return `~${Math.round(seconds)}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return s ? `~${m}m ${s}s` : `~${m}m`;
+}
+
+/**
+ * Prices here run from $0.02 to $0.096, so two decimals would collapse
+ * $0.048 and $0.025 into the same-looking figure. Show three where it matters.
+ */
+export function formatCost(usd?: number | null): string {
+  if (usd == null) return 'price n/a';
+  const rounded = Math.round(usd * 1000) / 1000;
+  return `$${rounded.toFixed(rounded < 0.01 ? 4 : 3).replace(/0$/, '')}`;
 }
 
 export interface ProviderInfo {

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { LoraPicker } from './LoraPicker';
+import { formatCost, formatDuration } from '../../api/editor';
 
 const PRESET_PROMPTS = [
   { emoji: '🌅', label: 'Golden Hour', prompt: 'Transform to golden hour lighting with warm orange and golden tones, beautiful sunset ambiance' },
@@ -58,6 +59,8 @@ export function PromptInput({ onEdit, isEditing }: PromptInputProps) {
   };
 
   const activeProviderInfo = state.providers.find(p => p.id === state.activeProvider);
+  // Drives the time/price estimate on the badge below.
+  const activeModelInfo = activeProviderInfo?.models?.find(m => m.id === state.activeModel);
 
   return (
     <div className="editor-controls">
@@ -134,6 +137,11 @@ export function PromptInput({ onEdit, isEditing }: PromptInputProps) {
           <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>
             {String(state.activeModel).split('/').pop()?.replace('flux-kontext-', 'kontext-') || state.activeModel}
           </span>
+          {activeModelInfo && (
+            <span className="provider-badge-est">
+              {formatDuration(activeModelInfo.avgSeconds)} · {formatCost(activeModelInfo.costUsd)}
+            </span>
+          )}
         </button>
 
         {/* Renders only when the active model is LoRA-capable. */}

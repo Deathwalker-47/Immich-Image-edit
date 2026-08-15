@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { fetchSettings, saveSettings, fetchProviders, AppSettings, ProviderInfo } from '../../api/editor';
+import { fetchSettings, saveSettings, fetchProviders, formatCost, formatDuration, AppSettings, ProviderInfo } from '../../api/editor';
 
 export function SettingsModal() {
   const { state, dispatch, addToast } = useApp();
@@ -241,9 +241,35 @@ export function SettingsModal() {
                         onChange={e => updateProviderKey(p, 'model', e.target.value)}
                       >
                         {providerModels.map(m => (
-                          <option key={m.id} value={m.id}>{m.name}</option>
+                          <option key={m.id} value={m.id}>
+                            {`${m.name} · ${formatDuration(m.avgSeconds)} · ${formatCost(m.costUsd)}`}
+                          </option>
                         ))}
                       </select>
+                      {(() => {
+                        // Detail for the selected model only. A <option> can hold
+                        // plain text and nothing more, so the caveats that matter
+                        // — an unmeasured timing, a per-resolution price — live
+                        // here instead of being silently dropped.
+                        const sel = providerModels.find(m => m.id === settings.providers[p].model);
+                        if (!sel) return null;
+                        return (
+                          <div className="model-meta">
+                            <div className="model-meta-stats">
+                              <span title="Measured mean time for one edit, provider queue included">
+                                ⏱ {formatDuration(sel.avgSeconds)}
+                              </span>
+                              <span title="Provider's published price per image">
+                                 {formatCost(sel.costUsd)}
+                              </span>
+                              {sel.loraCapable && <span className="model-meta-lora">LoRA</span>}
+                            </div>
+                            {sel.description && <div>{sel.description}</div>}
+                            {sel.costNote && <div>{sel.costNote}</div>}
+                            {sel.speedNote && <div className="model-meta-warn">{sel.speedNote}</div>}
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
