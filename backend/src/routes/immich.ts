@@ -29,14 +29,67 @@ router.get('/albums', async (_req: Request, res: Response) => {
   }
 });
 
-// GET /api/immich/albums/:id — album with assets
+// Immich caps a single search page at 1000. Albums larger than that need paging.
+const ALBUM_PAGE_SIZE = 1000;
+// Safety stop so a pathologically large album can't spin here forever. If it trips
+// we log it — a silently truncated album would look identical to a complete one.
+const ALBUM_MAX_ASSETS = 5000;
+
+// GET /api/immich/albums/:id — album metadata plus its (image) assets
 router.get('/albums/:id', async (req: Request, res: Response) => {
   try {
     const client = getImmichClient();
-    const { data } = await client.get(`/albums/${req.params.id}?withoutAssets=false`);
-    res.json(data);
+    const albumId = req.params.id;
+
+    // GET /albums/:id no longer returns an `assets` array on current Immich —
+    // verified live: with `?withoutAssets=false`, `?withoutAssets=true`, and with
+    // no parameter at all, the response carries `assetCount` but no `assets` key.
+    // It is the same class of breakage as the removed getAllAssets endpoint that
+    // killed the timeline (see the /timeline handler below): the album kept
+    // *loading* while showing zero photos, so it read as a rendering bug rather
+    // than an API change. Assets now come from search/metadata — the same
+    // endpoint the timeline uses — filtered by albumIds.
+    const { data: album } = await client.get(`/albums/${albumId}`);
+
+    const assets: any[] = [];
+    let page = 1;
+    let truncated = false;
+
+    while (true) {
+      const { data } = await client.post('/search/metadata', {
+        albumIds: [albumId],
+        page,
+        size: ALBUM_PAGE_SIZE,
+        // This is a photo editor — videos in an album are not editable, so they
+        // are filtered out here rather than rendered as dead tiles.
+        type: 'IMAGE',
+        order: 'desc',
+        withExif: false,
+      });
+
+      const bucket = data?.assets;
+      assets.push(...(bucket?.items ?? []));
+
+      if (assets.length >= ALBUM_MAX_ASSETS) {
+        truncated = true;
+        break;
+      }
+      // Immich returns nextPage: null on the final page.
+      const next = bucket?.nextPage;
+      if (!next) break;
+      page = Number(next);
+      if (!Number.isFinite(page)) break;
+    }
+
+    if (truncated) {
+      console.warn(
+        `[Immich] Album ${albumId} exceeded ${ALBUM_MAX_ASSETS} images; returning a truncated list.`
+      );
+    }
+
+    res.json({ ...album, assets, assetsTruncated: truncated });
   } catch (err: any) {
-    console.error('[Immich] GET /albums/:id error:', err.message);
+    console.error('[Immich] GET /albums/:id error:', err.message, err.response?.data);
     res.status(err.response?.status || 500).json({ error: err.message });
   }
 });
