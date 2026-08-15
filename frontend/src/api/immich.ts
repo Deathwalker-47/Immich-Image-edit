@@ -118,7 +118,10 @@ export async function fetchTimeline(page = 1, size = 60): Promise<ImmichAsset[]>
 }
 
 export async function uploadEditedImage(params: {
-  imageBase64: string;
+  /** Provider result URL — preferred; the backend fetches it, avoiding CORS. */
+  imageUrl?: string;
+  /** Fallback for sources with no server-fetchable address, e.g. data: URLs. */
+  imageBase64?: string;
   filename?: string;
   albumId?: string;
 }): Promise<{ assetId: string; success: boolean }> {

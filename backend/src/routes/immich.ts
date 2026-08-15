@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import axios from 'axios';
 import FormData from 'form-data';
+import { fetchProviderImage, ProviderImageError } from '../providerHosts';
 
 const router = Router();
 
@@ -177,23 +178,38 @@ router.get('/assets/:id/original', async (req: Request, res: Response) => {
 // POST /api/immich/upload — upload edited image back to Immich
 router.post('/upload', async (req: Request, res: Response) => {
   try {
-    const { imageBase64, filename, albumId, deviceAssetId } = req.body;
+    const { imageBase64, imageUrl, filename, albumId, deviceAssetId } = req.body;
 
-    if (!imageBase64) {
-      res.status(400).json({ error: 'imageBase64 is required' });
+    if (!imageBase64 && !imageUrl) {
+      res.status(400).json({ error: 'imageBase64 or imageUrl is required' });
       return;
     }
 
     const client = getImmichClient();
 
-    // Convert base64 to buffer
-    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-    const imageBuffer = Buffer.from(base64Data, 'base64');
+    let imageBuffer: Buffer;
+    let mimeType: string;
 
-    // Determine content type
-    const mimeMatch = imageBase64.match(/^data:(image\/\w+);base64,/);
-    const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-    const ext = mimeType.split('/')[1];
+    if (imageUrl) {
+      // Preferred path. The browser cannot fetch a provider result itself —
+      // those URLs are cross-origin with no Access-Control-Allow-Origin header,
+      // so the frontend's fetch-then-base64 approach was blocked by CORS and
+      // every "Save to Immich" of an edit failed. Fetching here avoids CORS and
+      // also keeps the image off the phone entirely: it goes provider -> server
+      // -> Immich, instead of being downloaded to the device and re-uploaded as
+      // base64, which on a mobile connection meant moving a multi-megabyte
+      // image twice for no reason.
+      const fetched = await fetchProviderImage(String(imageUrl));
+      imageBuffer = fetched.buffer;
+      mimeType = fetched.contentType;
+    } else {
+      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      imageBuffer = Buffer.from(base64Data, 'base64');
+      const mimeMatch = imageBase64.match(/^data:(image\/\w+);base64,/);
+      mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    }
+
+    const ext = (mimeType.split('/')[1] || 'jpg').split(';')[0];
 
     const assetFilename = filename || `ai-edit-${Date.now()}.${ext}`;
     const assetDeviceId = deviceAssetId || `immich-ai-editor-${Date.now()}`;
@@ -232,8 +248,11 @@ router.post('/upload', async (req: Request, res: Response) => {
 
     res.json({ success: true, assetId: newAssetId, data: uploadResponse.data });
   } catch (err: any) {
+    // A refused host or an unreachable provider CDN carries its own status;
+    // flattening those into 500 would hide why the save was rejected.
+    const status = err instanceof ProviderImageError ? err.status : (err.response?.status || 500);
     console.error('[Immich] POST /upload error:', err.message, err.response?.data);
-    res.status(err.response?.status || 500).json({ error: err.message });
+    res.status(status).json({ error: err.message });
   }
 });
 

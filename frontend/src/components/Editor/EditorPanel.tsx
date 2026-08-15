@@ -67,16 +67,28 @@ export function EditorPanel() {
     dispatch({ type: 'SET_EDITING', editing: true, progress: 'Saving to Immich...' });
 
     try {
-      // Fetch the result image as base64
-      const imgRes = await fetch(currentImage.imageUrl);
-      const blob = await imgRes.blob();
-      const base64 = await blobToBase64(blob);
-
       const originalName = activeAsset?.originalFileName || 'edited.jpg';
       const name = `ai-edit-${Date.now()}-${originalName}`;
 
+      // Hand the backend the URL and let it do the fetching. This used to
+      // fetch(imageUrl) here and re-upload the bytes as base64, but provider
+      // result URLs are cross-origin with no Access-Control-Allow-Origin
+      // header, so that fetch was blocked by CORS and saving an edit always
+      // failed. Server-side there is no CORS, and the image goes
+      // provider -> server -> Immich instead of being pulled down to the phone
+      // and pushed back up again.
+      //
+      // A data: URL (or anything else not http) has no server-fetchable
+      // address, so those still go up as base64.
+      const src = currentImage.imageUrl;
+      const isFetchableUrl = /^https?:\/\//i.test(src);
+
+      const payload = isFetchableUrl
+        ? { imageUrl: src }
+        : { imageBase64: await blobToBase64(await (await fetch(src)).blob()) };
+
       const { assetId } = await uploadEditedImage({
-        imageBase64: base64,
+        ...payload,
         filename: name,
         albumId: state.selectedAlbumId || undefined,
       });
