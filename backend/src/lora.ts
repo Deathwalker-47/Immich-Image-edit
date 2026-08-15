@@ -21,12 +21,46 @@ import { LORA_CAPS, ProviderId } from './models';
 const RUNWARE_API_URL = 'https://api.runware.ai/v1';
 
 /** Runtime (writable, volume-mounted) location of the AIR cache. */
-const DATA_DIR = path.join(__dirname, '../data');
+const DATA_DIR = process.env.LORA_DATA_DIR || path.join(__dirname, '../data');
 const MAPPING_PATH = path.join(DATA_DIR, 'runware_lora_mapping.json');
 
-/** Seed copies committed to the repo, used on first run. */
-const SEED_MAPPING_PATH = path.join(__dirname, '../../runware_lora_mapping.json');
-const LORA_DICT_PATH = path.join(__dirname, '../../master_lora_dict.json');
+/**
+ * Locate a seed JSON that lives at the REPO root in development but somewhere
+ * else entirely once containerised.
+ *
+ * These paths differ between the two environments and a single relative path
+ * cannot satisfy both: running from source, __dirname is <repo>/backend/dist so
+ * '../..' lands on the repo root correctly — but in the Docker image __dirname is
+ * /app/dist, so the same '../..' resolves to '/', and the files aren't there at
+ * all (the image's build context is ./backend, which doesn't even contain them).
+ * That silently produced an EMPTY LoRA catalogue in production while working
+ * perfectly in local testing.
+ *
+ * Rather than hardcode a second wrong guess, try the realistic locations in order
+ * and let an explicit env var win. Returns the first that exists, or the last
+ * candidate so callers still get a sensible path to report in an error.
+ */
+function resolveSeedPath(filename: string, envOverride?: string): string {
+  const candidates = [
+    envOverride,
+    path.join(__dirname, '..', filename),        // /app/<file>      (Docker, mounted next to dist)
+    path.join(__dirname, '../..', filename),     // <repo>/<file>    (local dev from backend/dist)
+    path.join(process.cwd(), filename),          // cwd fallback
+    path.join('/app', filename),                 // explicit Docker WORKDIR
+  ].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {
+      // Unreadable path — just try the next candidate.
+    }
+  }
+  return candidates[candidates.length - 1];
+}
+
+const SEED_MAPPING_PATH = resolveSeedPath('runware_lora_mapping.json', process.env.LORA_MAPPING_SEED_PATH);
+const LORA_DICT_PATH = resolveSeedPath('master_lora_dict.json', process.env.LORA_DICT_PATH);
 
 export interface LoraEntry {
   id: string;
@@ -111,7 +145,17 @@ export function loadCatalogue(): { entries: LoraEntry[]; config: LoraDictConfig 
   })).filter((entry) => !!entry.url);
 
   catalogueCache = { entries, config };
-  console.log(`[LoRA] Catalogue loaded: ${entries.length} LoRAs`);
+  if (entries.length) {
+    console.log(`[LoRA] Catalogue loaded: ${entries.length} LoRAs from ${LORA_DICT_PATH}`);
+  } else {
+    // Loud, because the failure is otherwise invisible: the picker just renders
+    // empty and every LoRA edit silently resolves to nothing.
+    console.warn(
+      `[LoRA] EMPTY CATALOGUE — no LoRAs loaded. Looked for master_lora_dict.json at "${LORA_DICT_PATH}". ` +
+      `In Docker this file must be mounted into the image (it is not in the ./backend build context); ` +
+      `set LORA_DICT_PATH to override.`
+    );
+  }
   return catalogueCache;
 }
 

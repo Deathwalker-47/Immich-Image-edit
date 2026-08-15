@@ -45,12 +45,31 @@ router.get('/albums/:id', async (req: Request, res: Response) => {
 router.get('/timeline', async (req: Request, res: Response) => {
   try {
     const client = getImmichClient();
-    const page = req.query.page || 1;
-    const size = req.query.size || 50;
-    const { data } = await client.get(`/assets?page=${page}&size=${size}&order=desc`);
-    res.json(data);
+    const page = Number(req.query.page) || 1;
+    const size = Number(req.query.size) || 50;
+
+    // POST /search/metadata, NOT GET /assets?page=&size=. The latter is the
+    // long-removed getAllAssets endpoint (dropped in immich-app/immich#9715);
+    // on current Immich it 404s, which is the likely real cause of the
+    // "Failed to load photos" dead-end described in HANDOFF.md §6.5 — that was
+    // characterised as an intermittent failure, but a removed endpoint fails
+    // every time for the "Recent Photos" view while albums keep working, which
+    // presents the same way. search/metadata is the documented replacement and
+    // is the same endpoint verified working in the sibling bridge project.
+    const { data } = await client.post('/search/metadata', {
+      page,
+      size,
+      order: 'desc',
+      type: 'IMAGE',
+      withExif: false,
+    });
+
+    // search/metadata nests results as { assets: { items: [...] } }. Normalise to
+    // a plain array here so the frontend gets one predictable shape.
+    const items = data?.assets?.items ?? data?.items ?? data;
+    res.json(Array.isArray(items) ? items : []);
   } catch (err: any) {
-    console.error('[Immich] GET /timeline error:', err.message);
+    console.error('[Immich] GET /timeline error:', err.message, err.response?.data);
     res.status(err.response?.status || 500).json({ error: err.message });
   }
 });

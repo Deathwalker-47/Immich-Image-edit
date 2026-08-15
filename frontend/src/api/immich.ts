@@ -107,8 +107,13 @@ export async function fetchTimeline(page = 1, size = 60): Promise<ImmichAsset[]>
   // The endpoint has returned a bare array and a paginated object at different
   // times; tolerate both, and anything else becomes an empty list rather than a
   // downstream "x.filter is not a function".
+  //
+  // `assets.items` is the shape Immich's search/metadata returns natively. The
+  // backend now normalises it to a plain array, but this also handles it directly
+  // — otherwise a nested payload reaching here would be read as a non-array and
+  // silently render as "no photos found" on a successful fetch.
   if (Array.isArray(data)) return data;
-  const items = data?.assets ?? data?.items;
+  const items = data?.assets?.items ?? data?.items ?? data?.assets;
   return Array.isArray(items) ? items : [];
 }
 

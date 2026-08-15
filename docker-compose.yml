@@ -19,6 +19,18 @@ services:
       - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN}
       - ATLAS_API_KEY=${ATLAS_API_KEY}
       - AI_EDITS_ALBUM_NAME=${AI_EDITS_ALBUM_NAME:-AI Edits}
+    volumes:
+      # Persistent runtime state. Without this, `docker compose build` wipes both
+      # settings.json AND the Runware LoRA AIR cache on every deploy, forcing a
+      # full re-upload of every LoRA on next use (HANDOFF.md §8 calls for exactly
+      # this mount; it had never been added).
+      - ./backend/data:/app/data
+      # The LoRA catalogue and AIR-cache seed live at the repo root, but the
+      # backend image's build context is ./backend — so they cannot be COPYed in
+      # and must be mounted. Read-only: the writable copy lives in /app/data.
+      # Without these, the catalogue loads empty and the LoRA picker is blank.
+      - ./master_lora_dict.json:/app/master_lora_dict.json:ro
+      - ./runware_lora_mapping.json:/app/runware_lora_mapping.json:ro
     networks:
       - immich_default
       - editor_internal
