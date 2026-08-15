@@ -948,6 +948,19 @@ html, body {
   display: flex;
   align-items: center;
   gap: var(--space-4);
+  /* Must wrap. This row holds the provider badge, the LoRA picker, and the
+     strength and steps sliders. Without wrapping they overflow a phone-width
+     viewport and the right-hand controls are clipped — which showed up as the
+     Strength slider being cut off, and only when a LoRA-capable model was
+     selected, because the LoRA picker is the fourth child that pushes the row
+     past the edge (it renders for those models only). */
+  flex-wrap: wrap;
+  row-gap: var(--space-3);
+}
+
+/* Keep a wrapped slider usable rather than letting it collapse to a stub. */
+.controls-row .slider-wrap {
+  min-width: 190px;
 }
 
 .provider-badge {

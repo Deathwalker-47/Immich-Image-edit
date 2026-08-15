@@ -284,26 +284,11 @@ export const MODELS: EditModel[] = [
         supportsNegativePrompt: false,
         maxReferenceImages: 14,
       },
-      fal: {
-        slug: 'fal-ai/bytedance/seedream/v4.5/edit',
-        verified: false,
-        note: 'VERIFY against fal.ai/explore before trusting.',
-        dimensions: { kind: 'provider-default' },
-        supportsSteps: false,
-        supportsCfg: false,
-        supportsNegativePrompt: false,
-        maxReferenceImages: 10,
-      },
-      replicate: {
-        slug: 'bytedance/seedream-4.5',
-        verified: false,
-        note: 'Replicate carries the Seedream family; confirm whether the slug is seedream-4 or seedream-4.5.',
-        dimensions: { kind: 'provider-default' },
-        supportsSteps: false,
-        supportsCfg: false,
-        supportsNegativePrompt: false,
-        maxReferenceImages: 10,
-      },
+      // fal + replicate REMOVED 2026-08-15 — see the "Removed variants" note at
+      // the bottom of this file. Both endpoints exist but take an image field
+      // this codebase does not send (fal wants `image_urls` as an array, not
+      // `image_url`; Replicate wants `image_input`, not `input_image`), so both
+      // would have ignored the user's photo instead of editing it.
       atlas: {
         slug: 'bytedance/seedream-v4.5/edit',
         verified: true,
@@ -339,26 +324,10 @@ export const MODELS: EditModel[] = [
         supportsNegativePrompt: false,
         maxReferenceImages: 1,
       },
-      fal: {
-        slug: 'fal-ai/wan/v2.7/image-to-image',
-        verified: false,
-        note: 'VERIFY — the handoff itself flagged this fal slug as unknown.',
-        dimensions: { kind: 'provider-default' },
-        supportsSteps: false,
-        supportsCfg: false,
-        supportsNegativePrompt: false,
-        maxReferenceImages: 1,
-      },
-      replicate: {
-        slug: 'wan-video/wan-2.7-image',
-        verified: false,
-        note: 'VERIFY on replicate.com before trusting.',
-        dimensions: { kind: 'provider-default' },
-        supportsSteps: false,
-        supportsCfg: false,
-        supportsNegativePrompt: false,
-        maxReferenceImages: 1,
-      },
+      // fal + replicate REMOVED 2026-08-15 — see the "Removed variants" note at
+      // the bottom of this file. fal has no Wan 2.7 image-to-image endpoint at
+      // all (only text-to-image), and Replicate's takes `images`, not
+      // `input_image`.
       atlas: {
         slug: 'alibaba/wan-2.7/image-edit',
         verified: true,
@@ -389,26 +358,9 @@ export const MODELS: EditModel[] = [
         supportsNegativePrompt: false,
         maxReferenceImages: 3,
       },
-      fal: {
-        slug: 'xai/grok-imagine-image/edit',
-        verified: false,
-        note: 'VERIFY against fal.ai/explore before trusting.',
-        dimensions: { kind: 'provider-default' },
-        supportsSteps: false,
-        supportsCfg: false,
-        supportsNegativePrompt: false,
-        maxReferenceImages: 3,
-      },
-      replicate: {
-        slug: 'xai/grok-imagine-image',
-        verified: false,
-        note: 'VERIFY on replicate.com before trusting.',
-        dimensions: { kind: 'provider-default' },
-        supportsSteps: false,
-        supportsCfg: false,
-        supportsNegativePrompt: false,
-        maxReferenceImages: 3,
-      },
+      // fal + replicate REMOVED 2026-08-15 — see the "Removed variants" note at
+      // the bottom of this file. fal wants `image_urls` (array), Replicate wants
+      // `image`; neither matches what those provider files send.
       atlas: {
         slug: 'xai/grok-imagine-image-quality/edit',
         verified: true,
@@ -579,6 +531,44 @@ export const MODELS: EditModel[] = [
     },
   },
 ];
+
+/**
+ * Removed variants — audited live on 2026-08-15. Do not re-add from memory.
+ *
+ * Six entries were carrying `verified: false` with "VERIFY before trusting"
+ * notes. Every one was checked against the provider's live API. The slugs were
+ * mostly *right*, which is exactly why this was worth checking: five of the six
+ * endpoints genuinely exist, so a smoke test that only asked "does the slug
+ * resolve?" would have passed them all. They were removed because this codebase
+ * cannot send them a usable image, not because they are fictional.
+ *
+ *   Replicate — schemas read from GET /v1/models/{owner}/{name}:
+ *     bytedance/seedream-4.5      exists; image field is `image_input`
+ *     wan-video/wan-2.7-image     exists; image field is `images`
+ *     xai/grok-imagine-image      exists; image field is `image`
+ *   providers/replicate.ts sends `input_image` (correct for Kontext, which is
+ *   all it was ever verified against). Cog SILENTLY DROPS unknown top-level
+ *   fields — the same trap that produced the earlier guidance_scale and
+ *   safety_tolerance bugs — so these would not have errored. They would have
+ *   ignored the user's photo and returned a fresh text-to-image generation that
+ *   looks like a plausible edit. That is the worst failure mode available.
+ *
+ *   Fal — schemas read from fal.ai/api/openapi/queue/openapi.json:
+ *     fal-ai/bytedance/seedream/v4.5/edit   exists; wants `image_urls` (ARRAY)
+ *     xai/grok-imagine-image/edit           exists; wants `image_urls` (ARRAY)
+ *     fal-ai/wan/v2.7/image-to-image        DOES NOT EXIST (404). Only
+ *       fal-ai/wan/v2.7/text-to-image is published, which cannot edit at all.
+ *   providers/fal.ts sends `image_url` (singular).
+ *
+ * Re-adding any of these means teaching the provider file that model's image
+ * field — the registry already models this for Atlas via `imageInput`, so
+ * extend that to Replicate/Fal rather than hardcoding a second convention — and
+ * then confirming it live with a real edit before setting `verified: true`.
+ *
+ * What remains is deliberately narrow and all live-confirmed: Runware carries
+ * the full 10-model catalogue, Atlas 5, and Fal and Replicate are Kontext Dev
+ * and Kontext Dev LoRA only.
+ */
 
 export const DEFAULT_PROVIDER: ProviderId = 'runware';
 export const DEFAULT_MODEL_ID = 'flux-kontext-dev';
