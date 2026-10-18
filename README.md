@@ -127,6 +127,19 @@ npm install
 npm run dev                   # starts on :5173 with proxy to :3778
 ```
 
+### Live provider check
+
+`backend/scripts/matrix-test.mjs` runs one real edit for every provider × model the backend advertises (plus a LoRA edit per LoRA-capable model) through `/api/edit`, and labels each result PASS, CREDIT (account out of balance), MODERATED (upstream filter rejected the input), SKIP (no key) or FAIL. Every PASS spends provider credit, so start with `--list`.
+
+```bash
+cd backend
+npm run test:matrix -- --list                                  # show the matrix, run nothing
+npm run test:matrix -- --provider atlas                        # against a local backend on :3778
+npm run test:matrix -- --base https://your-editor-domain --image ./neutral.jpg
+```
+
+Exits 1 only on a real FAIL. See `--help` for model filters, concurrency, timeouts and JSON output.
+
 ---
 
 ## 📁 Project Structure
