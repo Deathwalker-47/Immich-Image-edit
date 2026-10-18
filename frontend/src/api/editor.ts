@@ -154,13 +154,32 @@ export async function fetchSettings(): Promise<AppSettings> {
   return res.json();
 }
 
+/**
+ * Sends only the preferences the server lets the browser change. The Immich URL
+ * and API keys live in the server's .env, and the server refuses a save that
+ * includes them — so they are left out here rather than echoed back masked.
+ */
 export async function saveSettings(settings: Partial<AppSettings>): Promise<void> {
+  const body: Record<string, unknown> = {};
+  if (settings.defaultProvider !== undefined) body.defaultProvider = settings.defaultProvider;
+  if (settings.defaultStrength !== undefined) body.defaultStrength = settings.defaultStrength;
+  if (settings.defaultSteps !== undefined) body.defaultSteps = settings.defaultSteps;
+  if (settings.aiEditsAlbumName !== undefined) body.aiEditsAlbumName = settings.aiEditsAlbumName;
+  if (settings.providers) {
+    body.providers = Object.fromEntries(
+      Object.entries(settings.providers).map(([id, p]) => [id, { model: p.model }])
+    );
+  }
+
   const res = await fetch('/api/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(settings),
+    body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error('Failed to save settings');
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.error || 'Failed to save settings');
+  }
 }
 
 export async function fetchProviders(): Promise<ProviderInfo[]> {

@@ -43,6 +43,9 @@ IMMICH_INTERNAL_URL=http://immich-server:2283    # Internal Docker URL
 IMMICH_PUBLIC_URL=https://photos.yourdomain.com  # Your public Immich URL
 IMMICH_API_KEY=your_immich_api_key_here
 
+# Unlocks the editor — generate with: openssl rand -hex 32
+EDITOR_ACCESS_KEY=
+
 # At least one AI provider:
 FAL_KEY=your_fal_api_key_here
 # or
@@ -63,10 +66,17 @@ The editor will be available at: **`http://your-hetzner-ip:3777`**
 
 ### Step 3 — Configure via UI
 
-Open the app and click ⚙️ **Settings** to:
-- Verify your Immich connection
-- Set/change API keys
+Open the app and enter the `EDITOR_ACCESS_KEY` once — each browser, and the
+Immich app's WebView, keeps a signed cookie for a year afterwards. A
+`https://<editor>/#key=<key>` bookmark unlocks in one step; the fragment never
+reaches the server or its logs.
+
+Then click ⚙️ **Settings** to:
+- Verify your Immich connection and which provider keys are configured
 - Switch default AI provider and model
+
+The Immich URL and all API keys are read only from `.env`; Settings shows them
+but cannot change them.
 
 ---
 

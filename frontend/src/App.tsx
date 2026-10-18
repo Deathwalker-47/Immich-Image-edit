@@ -5,6 +5,7 @@ import { EditorPanel } from './components/Editor/EditorPanel';
 import { SettingsModal } from './components/Settings/SettingsModal';
 import { ToastContainer } from './components/Toast/ToastContainer';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { AccessGate } from './components/AccessGate/AccessGate';
 import { fetchSettings, fetchProviders } from './api/editor';
 import { fetchAssetInfo } from './api/immich';
 
@@ -23,8 +24,8 @@ function AppShell() {
         console.error('Failed to load initial settings:', err);
         addToast({
           type: 'warning',
-          title: 'Configure your settings',
-          message: 'Click the ⚙ icon to set up your Immich URL and API keys',
+          title: 'Could not load settings',
+          message: 'The Immich URL and API keys are set in the server\'s .env file — check it, then reload.',
         });
       });
 
@@ -154,8 +155,10 @@ function AppShell() {
 
 export default function App() {
   return (
-    <AppProvider>
-      <AppShell />
-    </AppProvider>
+    <AccessGate>
+      <AppProvider>
+        <AppShell />
+      </AppProvider>
+    </AccessGate>
   );
 }

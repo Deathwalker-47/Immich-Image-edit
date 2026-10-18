@@ -25,14 +25,14 @@ export function SettingsModal() {
     setSettings(prev => prev ? { ...prev, [key]: value } : prev);
   };
 
-  const updateProviderKey = (provider: 'fal' | 'runware' | 'replicate' | 'atlas', key: 'apiKey' | 'model', value: string) => {
+  const updateProviderModel = (provider: 'fal' | 'runware' | 'replicate' | 'atlas', value: string) => {
     setSettings(prev => {
       if (!prev) return prev;
       return {
         ...prev,
         providers: {
           ...prev.providers,
-          [provider]: { ...prev.providers[provider], [key]: value },
+          [provider]: { ...prev.providers[provider], model: value },
         },
       };
     });
@@ -76,6 +76,15 @@ export function SettingsModal() {
     runware: 'https://runware.ai/account/api-keys',
     replicate: 'https://replicate.com/account/api-tokens',
     atlas: 'https://www.atlascloud.ai/dashboard',
+  };
+  // The Immich URL and every key are read-only here: they come from the server's
+  // .env, which is the only place the backend reads them from, and the server
+  // refuses any attempt to change them from the browser.
+  const providerEnvKeys: Record<string, string> = {
+    fal: 'FAL_KEY',
+    runware: 'RUNWARE_API_KEY',
+    replicate: 'REPLICATE_API_TOKEN',
+    atlas: 'ATLAS_API_KEY',
   };
 
   return (
@@ -122,11 +131,11 @@ export function SettingsModal() {
                 id="immich-url"
                 className="form-input"
                 type="url"
-                placeholder="https://photos.yourdomain.com"
+                placeholder="Not set"
                 value={settings.immichUrl}
-                onChange={e => updateSetting('immichUrl', e.target.value)}
+                readOnly
               />
-              <div className="form-hint">Public URL of your Immich instance (for browser access)</div>
+              <div className="form-hint">Set by IMMICH_PUBLIC_URL in the server's .env</div>
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="immich-api-key">Immich API Key</label>
@@ -134,11 +143,11 @@ export function SettingsModal() {
                 id="immich-api-key"
                 className="form-input"
                 type="password"
-                placeholder="••••••••"
+                placeholder="Not set"
                 value={settings.immichApiKey}
-                onChange={e => updateSetting('immichApiKey', e.target.value)}
+                readOnly
               />
-              <div className="form-hint">Account Settings → API Keys in your Immich web UI</div>
+              <div className="form-hint">Set by IMMICH_API_KEY in the server's .env</div>
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="ai-album-name">AI Edits Album Name</label>
@@ -189,7 +198,6 @@ export function SettingsModal() {
           <div className="settings-section">
             <div className="settings-section-title">Provider API Keys</div>
             {providerOrder.map(p => {
-              const isConfigured = !!settings.providers[p].apiKey && !settings.providers[p].apiKey.includes('•••');
               const configuredFromLoad = providers.find(x => x.id === p)?.configured;
               const providerModels = providers.find(x => x.id === p)?.models || [];
 
@@ -209,9 +217,9 @@ export function SettingsModal() {
                         id={`${p}-api-key`}
                         className="form-input"
                         type="password"
-                        placeholder="sk-..."
+                        placeholder="Not set"
                         value={settings.providers[p].apiKey}
-                        onChange={e => updateProviderKey(p, 'apiKey', e.target.value)}
+                        readOnly
                         style={{ flex: 1 }}
                       />
                       <a
@@ -229,6 +237,7 @@ export function SettingsModal() {
                         </svg>
                       </a>
                     </div>
+                    <div className="form-hint">Set by {providerEnvKeys[p]} in the server's .env</div>
                   </div>
 
                   {providerModels.length > 0 && (
@@ -238,7 +247,7 @@ export function SettingsModal() {
                         id={`${p}-model`}
                         className="form-select"
                         value={settings.providers[p].model}
-                        onChange={e => updateProviderKey(p, 'model', e.target.value)}
+                        onChange={e => updateProviderModel(p, e.target.value)}
                       >
                         {providerModels.map(m => (
                           <option key={m.id} value={m.id}>

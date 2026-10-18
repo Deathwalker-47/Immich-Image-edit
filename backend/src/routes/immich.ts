@@ -149,7 +149,7 @@ router.get('/assets/:id/thumbnail', async (req: Request, res: Response) => {
       responseType: 'stream',
     });
     res.set('Content-Type', (response.headers['content-type'] as string) || 'image/jpeg');
-    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Cache-Control', 'private, max-age=86400');
     response.data.pipe(res);
   } catch (err: any) {
     console.error('[Immich] GET thumbnail error:', err.message);
@@ -167,7 +167,7 @@ router.get('/assets/:id/original', async (req: Request, res: Response) => {
     });
     const contentType = (response.headers['content-type'] as string) || 'image/jpeg';
     res.set('Content-Type', contentType);
-    res.set('Cache-Control', 'public, max-age=3600');
+    res.set('Cache-Control', 'private, max-age=3600');
     res.send(Buffer.from(response.data));
   } catch (err: any) {
     console.error('[Immich] GET original error:', err.message);

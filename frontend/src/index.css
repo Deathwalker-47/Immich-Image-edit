@@ -1520,3 +1520,63 @@ input[type="range"]::-webkit-slider-thumb:hover {
   }
 }
 @media (max-width: 768px) { .app-shell.editor .sidebar { display: none; } .before-img, .after-img { max-height: calc(100vh - 350px); } }
+
+/* ============================================================
+   ACCESS GATE — the unlock screen shown before the app
+   ============================================================ */
+.access-gate {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: var(--bg-base);
+}
+
+.access-gate-card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-6);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.6);
+  text-align: center;
+}
+
+.access-gate-icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-dim);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-md);
+}
+
+.access-gate-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.access-gate-desc {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.access-gate-error {
+  font-size: 13px;
+  color: var(--error);
+}
+
+.access-gate .btn {
+  justify-content: center;
+}

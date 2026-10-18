@@ -19,6 +19,9 @@ services:
       - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN}
       - ATLAS_API_KEY=${ATLAS_API_KEY}
       - AI_EDITS_ALBUM_NAME=${AI_EDITS_ALBUM_NAME:-AI Edits}
+      # Unlocks the editor (backend/src/auth.ts). Without it every /api request
+      # is refused — the editor is public on the internet, so it fails closed.
+      - EDITOR_ACCESS_KEY=${EDITOR_ACCESS_KEY}
     volumes:
       # Persistent runtime state. Without this, `docker compose build` wipes both
       # settings.json AND the Runware LoRA AIR cache on every deploy, forcing a

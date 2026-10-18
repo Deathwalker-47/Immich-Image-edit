@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { immichRouter } from './routes/immich';
 import { editRouter } from './routes/edit';
 import { settingsRouter } from './routes/settings';
+import { authRouter, requireAccess, accessKeyConfigured } from './auth';
 
 dotenv.config();
 
@@ -24,7 +25,10 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Routes
+// Routes. /api/auth is the only API surface reachable without a session — every
+// router mounted after requireAccess needs the access-key cookie (see auth.ts).
+app.use('/api/auth', authRouter);
+app.use('/api', requireAccess);
 app.use('/api/immich', immichRouter);
 app.use('/api/edit', editRouter);
 app.use('/api/settings', settingsRouter);
@@ -44,6 +48,9 @@ app.listen(PORT, '0.0.0.0', () => {
     process.env.REPLICATE_API_TOKEN ? 'Replicate' : null,
     process.env.ATLAS_API_KEY ? 'Atlas Cloud' : null,
   ].filter(Boolean).join(', ') || 'none configured'}\n`);
+  if (!accessKeyConfigured()) {
+    console.error('[Auth] EDITOR_ACCESS_KEY is missing or shorter than 32 characters — every /api request will be refused until it is set.');
+  }
 });
 
 export default app;
