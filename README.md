@@ -143,6 +143,7 @@ npm run dev                   # starts on :5173 with proxy to :3778
 
 ```bash
 cd backend
+export EDITOR_ACCESS_KEY=...                                   # the API refuses requests without it
 npm run test:matrix -- --list                                  # show the matrix, run nothing
 npm run test:matrix -- --provider atlas                        # against a local backend on :3778
 npm run test:matrix -- --base https://your-editor-domain --image ./neutral.jpg

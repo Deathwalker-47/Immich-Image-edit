@@ -44,7 +44,10 @@ const USAGE = `Usage: npm run test:matrix -- [options]
   --skip-lora          skip the LoRA edits
   --list               print the matrix and exit without running any edit
   --json <file>        also write full results (incl. error details) to a file
-  --help`;
+  --help
+
+Set EDITOR_ACCESS_KEY in the environment: the backend refuses /api requests
+without the session cookie that key unlocks.`;
 
 const KNOWN_OUTCOMES = [
   { status: 'CREDIT', pattern: /insufficientCredits|Exhausted balance|User is locked/i },
@@ -84,11 +87,35 @@ function parseOptions() {
   return { ...values, base: values.base.replace(/\/+$/, ''), concurrency, timeoutSec };
 }
 
+// The backend's /api routes need the access-key session cookie (src/auth.ts).
+// Set by login() when EDITOR_ACCESS_KEY is in the environment — deliberately not
+// a flag, so the key stays out of shell history and the process list.
+let sessionCookie = null;
+
+async function login(base) {
+  const key = process.env.EDITOR_ACCESS_KEY;
+  if (!key) return;
+  const res = await fetch(base + '/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key }),
+    signal: AbortSignal.timeout(30_000),
+  }).catch((err) => {
+    throw new SetupError(`Cannot reach ${base}/api/auth/login: ${err.message}`);
+  });
+  const cookie = res.headers.getSetCookie().find((c) => c.startsWith('gedit_session='));
+  if (res.status !== 200 || !cookie) throw new SetupError(`Login with EDITOR_ACCESS_KEY failed (HTTP ${res.status})`);
+  sessionCookie = cookie.split(';')[0];
+}
+
 /** JSON request to the backend. Never throws on HTTP status — only on network/timeout. */
 async function api(base, method, path, body, timeoutMs = 60_000) {
+  const headers = {};
+  if (body) headers['Content-Type'] = 'application/json';
+  if (sessionCookie) headers.Cookie = sessionCookie;
   const res = await fetch(base + path, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers,
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -108,6 +135,9 @@ async function getJson(base, path) {
     res = await api(base, 'GET', path);
   } catch (err) {
     throw new SetupError(`Cannot reach ${base}${path}: ${err.message}`);
+  }
+  if (res.status === 401 && res.data?.code === 'AUTH_REQUIRED') {
+    throw new SetupError('The backend requires its access key — set EDITOR_ACCESS_KEY in the environment');
   }
   if (res.status !== 200) throw new SetupError(`GET ${path} returned ${res.status}: ${JSON.stringify(res.data).slice(0, 200)}`);
   return res.data;
@@ -215,6 +245,7 @@ const row = (r) =>
 
 async function main() {
   const opts = parseOptions();
+  await login(opts.base);
   const providers = await getJson(opts.base, '/api/settings/providers');
   const lora = opts['skip-lora'] ? null : await pickLora(opts.base);
   const jobs = buildJobs(providers, opts, lora);
